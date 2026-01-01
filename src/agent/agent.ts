@@ -13,6 +13,7 @@ export interface AgentConfig {
   thinkingModel?: string;
   systemPrompt?: string;
   maxTokens?: number;
+  voiceEnabled?: boolean;
 }
 
 const MODELS = {
@@ -53,9 +54,13 @@ export interface Agent {
 /**
  * Builds the system prompt by combining personality config with capabilities.
  */
-function buildSystemPrompt(): string {
+function buildSystemPrompt(voiceEnabled: boolean = false): string {
   const personality = loadPersonality();
   const personalitySection = personalityToPrompt(personality);
+
+  const voiceCapability = voiceEnabled
+    ? `- Send voice/audio responses when users ask (say "reply with voice", "respond with audio", etc.)`
+    : '';
 
   const capabilitiesSection = `
 You are a helpful AI assistant running on a Raspberry Pi.
@@ -75,6 +80,9 @@ You can:
 - Remember facts by category (remember, recall, list_memories, forget, move_memory)
 - Check application logs (logs)
 - Trigger self-updates (self_update)
+${voiceCapability}
+
+${voiceEnabled ? 'When users request voice responses, just respond normally with text - the system will automatically convert your response to audio.' : ''}
 
 Proactively remember important things the user tells you.`;
 
@@ -89,7 +97,7 @@ export function createAgent(config: AgentConfig): Agent {
     apiKey: config.apiKey,
   });
 
-  const systemPrompt = config.systemPrompt ?? buildSystemPrompt();
+  const systemPrompt = config.systemPrompt ?? buildSystemPrompt(config.voiceEnabled ?? false);
 
   const memory = new ConversationMemory({ maxMessages: 50 });
 

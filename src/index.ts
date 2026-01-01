@@ -54,6 +54,7 @@ async function main() {
   // Initialize Claude agent (Haiku by default, Opus for "think hard")
   const agent = createAgent({
     apiKey: config.anthropicApiKey!,
+    voiceEnabled: !!config.groqApiKey,
   });
   logger.info('Claude agent initialized (Haiku default, Opus for "think hard")');
 
