@@ -59,7 +59,7 @@ function buildSystemPrompt(voiceEnabled: boolean = false): string {
   const personalitySection = personalityToPrompt(personality);
 
   const voiceCapability = voiceEnabled
-    ? `- Send voice/audio responses when users ask (triggers include: "with voice", "with audio", "voice response", "send voice", "as audio", "read aloud", "con voz", etc.)`
+    ? `- Send voice/audio responses when users ask (triggers include: "with voice", "with audio", "in audio", "voice response", "send me audio", "speak to me", "talk to me", "read aloud", "con voz", "mandame audio", "hablame", etc.)`
     : '';
 
   const capabilitiesSection = `
