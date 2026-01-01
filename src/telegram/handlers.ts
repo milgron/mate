@@ -6,22 +6,36 @@ export type TextToSpeech = (text: string) => Promise<{ success: boolean; audioPa
 
 // Phrases that trigger voice response
 const VOICE_TRIGGERS = [
+  // English - flexible variations
   'reply with voice',
   'reply with audio',
+  'reply with a voice',
+  'reply with a audio',
   'respond with voice',
   'respond with audio',
+  'respond with a voice',
+  'respond with a audio',
   'voice response',
   'audio response',
+  'voice audio',
+  'with voice',
+  'with audio',
   'speak this',
   'say this',
   'read aloud',
   'read this aloud',
   'tell me aloud',
+  'send voice',
+  'send audio',
+  'as voice',
+  'as audio',
+  // Spanish
   'con voz',
   'responde con voz',
   'responde con audio',
   'dime en voz',
   'leelo en voz alta',
+  'en audio',
 ];
 
 /**
