@@ -63,39 +63,7 @@ async function main() {
     })
   );
 
-  // Handle text messages
-  bot.on('message:text', createMessageHandler(async (userId, message) => {
-    logger.info('Processing message', { userId, length: message.length });
-
-    const response = await agent.processMessage(userId, message);
-
-    logger.info('Message processed', { userId, responseLength: response.length });
-
-    return response;
-  }));
-
-  // Handle voice messages (if Groq API key is configured)
-  if (config.groqApiKey) {
-    const transcriber = new GroqTranscriber(config.groqApiKey);
-    logger.info('Voice message support enabled (Groq Whisper)');
-
-    bot.on('message:voice', createVoiceHandler(
-      (fileUrl) => transcriber.transcribeFromUrl(fileUrl),
-      async (userId, message) => {
-        logger.info('Processing voice message', { userId, length: message.length });
-
-        const response = await agent.processMessage(userId, message);
-
-        logger.info('Voice message processed', { userId, responseLength: response.length });
-
-        return response;
-      }
-    ));
-  } else {
-    logger.info('Voice message support disabled (GROQ_API_KEY not set)');
-  }
-
-  // Handle /start command
+  // Handle /start command (MUST be before message:text handler)
   bot.command('start', async (ctx) => {
     const voiceSupport = config.groqApiKey
       ? 'You can also send voice messages!\n\n'
@@ -166,6 +134,38 @@ async function main() {
 
     await ctx.reply(status);
   });
+
+  // Handle text messages (AFTER commands so /commands are not intercepted)
+  bot.on('message:text', createMessageHandler(async (userId, message) => {
+    logger.info('Processing message', { userId, length: message.length });
+
+    const response = await agent.processMessage(userId, message);
+
+    logger.info('Message processed', { userId, responseLength: response.length });
+
+    return response;
+  }));
+
+  // Handle voice messages (if Groq API key is configured)
+  if (config.groqApiKey) {
+    const transcriber = new GroqTranscriber(config.groqApiKey);
+    logger.info('Voice message support enabled (Groq Whisper)');
+
+    bot.on('message:voice', createVoiceHandler(
+      (fileUrl) => transcriber.transcribeFromUrl(fileUrl),
+      async (userId, message) => {
+        logger.info('Processing voice message', { userId, length: message.length });
+
+        const response = await agent.processMessage(userId, message);
+
+        logger.info('Voice message processed', { userId, responseLength: response.length });
+
+        return response;
+      }
+    ));
+  } else {
+    logger.info('Voice message support disabled (GROQ_API_KEY not set)');
+  }
 
   // Handle errors
   bot.catch((err) => {
