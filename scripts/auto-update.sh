@@ -15,6 +15,8 @@ DOCKER_DIR="${DOCKER_DIR:-$REPO_DIR/docker}"
 POLL_INTERVAL="${POLL_INTERVAL:-60}"  # seconds
 BRANCH="${BRANCH:-main}"
 LOG_FILE="${LOG_FILE:-/tmp/jarvis-updater.log}"
+TRIGGER_FILE="${TRIGGER_FILE:-/var/jarvis/update-trigger}"
+LAST_TRIGGER=""
 
 # Colors for output
 RED='\033[0;31m'
@@ -42,6 +44,18 @@ check_for_updates() {
     else
         return 1  # No updates
     fi
+}
+
+check_trigger_file() {
+    # Check if trigger file exists and has new content
+    if [ -f "$TRIGGER_FILE" ]; then
+        CURRENT_TRIGGER=$(cat "$TRIGGER_FILE" 2>/dev/null || echo "")
+        if [ -n "$CURRENT_TRIGGER" ] && [ "$CURRENT_TRIGGER" != "$LAST_TRIGGER" ]; then
+            LAST_TRIGGER="$CURRENT_TRIGGER"
+            return 0  # Triggered
+        fi
+    fi
+    return 1  # Not triggered
 }
 
 deploy() {
@@ -92,9 +106,21 @@ run_once() {
 
 run_daemon() {
     log "🤖 Starting auto-updater daemon (checking every ${POLL_INTERVAL}s)"
+    log "📁 Watching trigger file: $TRIGGER_FILE"
+
+    # Ensure trigger directory exists
+    mkdir -p "$(dirname "$TRIGGER_FILE")" 2>/dev/null || true
 
     while true; do
-        run_once
+        # Check for manual trigger from bot
+        if check_trigger_file; then
+            log "${GREEN}🔔 Update triggered by bot! Deploying...${NC}"
+            deploy
+        # Check for git updates
+        elif check_for_updates; then
+            log "${GREEN}📦 Updates found! Deploying...${NC}"
+            deploy
+        fi
         sleep "$POLL_INTERVAL"
     done
 }
