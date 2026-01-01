@@ -8,33 +8,22 @@ export interface TTSResult {
   error?: string;
 }
 
-// Available voices for Groq TTS
+// Available voices for Groq Orpheus TTS (canopylabs/orpheus-v1-english)
+// Voices ordered by conversational realism
 export type GroqVoice =
-  | 'Arista-PlayAI'
-  | 'Atlas-PlayAI'
-  | 'Basil-PlayAI'
-  | 'Briggs-PlayAI'
-  | 'Calum-PlayAI'
-  | 'Celeste-PlayAI'
-  | 'Cheyenne-PlayAI'
-  | 'Chip-PlayAI'
-  | 'Cillian-PlayAI'
-  | 'Deedee-PlayAI'
-  | 'Fritz-PlayAI'
-  | 'Gail-PlayAI'
-  | 'Indigo-PlayAI'
-  | 'Mamaw-PlayAI'
-  | 'Mason-PlayAI'
-  | 'Mikail-PlayAI'
-  | 'Mitch-PlayAI'
-  | 'Quinn-PlayAI'
-  | 'Thunder-PlayAI'
-  | 'Wagner-PlayAI';
+  | 'tara'
+  | 'leah'
+  | 'jess'
+  | 'leo'
+  | 'dan'
+  | 'mia'
+  | 'zac'
+  | 'zoe';
 
-const DEFAULT_VOICE: GroqVoice = 'Fritz-PlayAI';
+const DEFAULT_VOICE: GroqVoice = 'tara';
 
 /**
- * Text-to-speech using Groq's PlayAI TTS API.
+ * Text-to-speech using Groq's Orpheus TTS API.
  */
 export class GroqTTS {
   private client: Groq;
@@ -60,7 +49,7 @@ export class GroqTTS {
         : text;
 
       const response = await this.client.audio.speech.create({
-        model: 'playai-tts',
+        model: 'canopylabs/orpheus-v1-english',
         voice: this.voice,
         input: truncatedText,
         response_format: 'mp3',
