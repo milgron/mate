@@ -10,17 +10,21 @@ import { createAgent } from './agent/agent.js';
 import { UserWhitelist } from './security/whitelist.js';
 import { GroqTranscriber } from './integrations/transcription.js';
 import { logger } from './utils/logger.js';
+import { loadPersonality } from './agent/personality.js';
 
 // Track bot start time for uptime calculation
 const botStartTime = Date.now();
 
-// Load configuration from environment
+// Load personality config (for bot name)
+const personality = loadPersonality();
+
+// Load configuration from environment (BOT_NAME env var overrides personality.md)
 const config = {
   telegramToken: process.env.TELEGRAM_BOT_TOKEN,
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   allowedUsers: process.env.TELEGRAM_ALLOWED_USERS ?? '',
   groqApiKey: process.env.GROQ_API_KEY,
-  botName: process.env.BOT_NAME ?? 'clanker',
+  botName: process.env.BOT_NAME ?? personality.name,
 };
 
 // Validate required environment variables
@@ -49,7 +53,6 @@ async function main() {
   // Initialize Claude agent (Haiku by default, Opus for "think hard")
   const agent = createAgent({
     apiKey: config.anthropicApiKey!,
-    botName: config.botName,
   });
   logger.info('Claude agent initialized (Haiku default, Opus for "think hard")');
 

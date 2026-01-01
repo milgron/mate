@@ -5,6 +5,7 @@ import { FileTool } from './tools/file.js';
 import { UpdateTool } from './tools/update.js';
 import { LogsTool } from './tools/logs.js';
 import { MemoryTool } from './tools/memory.js';
+import { loadPersonality, personalityToPrompt } from './personality.js';
 
 export interface AgentConfig {
   apiKey: string;
@@ -12,7 +13,6 @@ export interface AgentConfig {
   thinkingModel?: string;
   systemPrompt?: string;
   maxTokens?: number;
-  botName?: string;
 }
 
 const MODELS = {
@@ -50,10 +50,15 @@ export interface Agent {
   clearHistory: (userId: string) => void;
 }
 
-const DEFAULT_BOT_NAME = 'clanker';
+/**
+ * Builds the system prompt by combining personality config with capabilities.
+ */
+function buildSystemPrompt(): string {
+  const personality = loadPersonality();
+  const personalitySection = personalityToPrompt(personality);
 
-function getDefaultSystemPrompt(botName: string): string {
-  return `You are ${botName}, a helpful AI assistant running on a Raspberry Pi.
+  const capabilitiesSection = `
+You are a helpful AI assistant running on a Raspberry Pi.
 
 You have persistent memory organized into categories that survives across sessions:
 - todo: Tasks and action items to complete
@@ -71,7 +76,9 @@ You can:
 - Check application logs (logs)
 - Trigger self-updates (self_update)
 
-Be concise and helpful. Proactively remember important things the user tells you.`;
+Proactively remember important things the user tells you.`;
+
+  return `${personalitySection}\n${capabilitiesSection}`;
 }
 
 /**
@@ -82,8 +89,7 @@ export function createAgent(config: AgentConfig): Agent {
     apiKey: config.apiKey,
   });
 
-  const botName = config.botName ?? DEFAULT_BOT_NAME;
-  const systemPrompt = config.systemPrompt ?? getDefaultSystemPrompt(botName);
+  const systemPrompt = config.systemPrompt ?? buildSystemPrompt();
 
   const memory = new ConversationMemory({ maxMessages: 50 });
 
