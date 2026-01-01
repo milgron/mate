@@ -5,10 +5,11 @@ import {
   createRateLimitMiddleware,
   createLoggingMiddleware,
 } from './telegram/middleware.js';
-import { createMessageHandler, createVoiceHandler } from './telegram/handlers.js';
+import { createMessageHandler, createMessageHandlerWithTTS, createVoiceHandlerWithTTS } from './telegram/handlers.js';
 import { createAgent } from './agent/agent.js';
 import { UserWhitelist } from './security/whitelist.js';
 import { GroqTranscriber } from './integrations/transcription.js';
+import { GroqTTS } from './integrations/tts.js';
 import { logger } from './utils/logger.js';
 
 // Track bot start time for uptime calculation
@@ -67,15 +68,16 @@ async function main() {
 
   // Handle /start command (MUST be before message:text handler)
   bot.command('start', async (ctx) => {
-    const voiceSupport = config.groqApiKey
-      ? 'You can also send voice messages!\n\n'
+    const voiceFeatures = config.groqApiKey
+      ? 'You can send voice messages!\n' +
+        'Say "reply with voice" to get audio responses.\n\n'
       : '';
 
     await ctx.reply(
       `Hello! I am ${config.botName}, your AI assistant.\n\n` +
         'Send me a message and I will help you.\n' +
         'I can execute shell commands and manage files.\n' +
-        voiceSupport +
+        voiceFeatures +
         'Tip: Start with "think hard" for complex tasks.\n\n' +
         'Commands:\n' +
         '/start - Show this message\n' +
@@ -130,43 +132,47 @@ async function main() {
       `  Bot uptime: ${formatTime(botUptime)}`,
       '',
       '▸ Features',
-      `  Voice: ${config.groqApiKey ? '✓' : '✗'}`,
+      `  Voice input: ${config.groqApiKey ? '✓' : '✗'}`,
+      `  Voice output: ${config.groqApiKey ? '✓' : '✗'}`,
       `  Users: ${whitelist.size}`,
     ].join('\n');
 
     await ctx.reply(status);
   });
 
-  // Handle text messages (AFTER commands so /commands are not intercepted)
-  bot.on('message:text', createMessageHandler(async (userId, message) => {
+  // Message processor function used by all handlers
+  const processUserMessage = async (userId: string, message: string) => {
     logger.info('Processing message', { userId, length: message.length });
-
     const response = await agent.processMessage(userId, message);
-
     logger.info('Message processed', { userId, responseLength: response.length });
-
     return response;
-  }));
+  };
 
-  // Handle voice messages (if Groq API key is configured)
+  // Handle text and voice messages with optional TTS support
   if (config.groqApiKey) {
     const transcriber = new GroqTranscriber(config.groqApiKey);
-    logger.info('Voice message support enabled (Groq Whisper)');
+    const tts = new GroqTTS(config.groqApiKey);
+    logger.info('Voice support enabled: transcription (Whisper) + TTS (PlayAI)');
 
-    bot.on('message:voice', createVoiceHandler(
+    // Text messages with TTS support
+    bot.on('message:text', createMessageHandlerWithTTS(
+      processUserMessage,
+      (text) => tts.synthesize(text),
+      GroqTTS.cleanup
+    ));
+
+    // Voice messages with TTS support
+    bot.on('message:voice', createVoiceHandlerWithTTS(
       (fileUrl) => transcriber.transcribeFromUrl(fileUrl),
-      async (userId, message) => {
-        logger.info('Processing voice message', { userId, length: message.length });
-
-        const response = await agent.processMessage(userId, message);
-
-        logger.info('Voice message processed', { userId, responseLength: response.length });
-
-        return response;
-      }
+      processUserMessage,
+      (text) => tts.synthesize(text),
+      GroqTTS.cleanup
     ));
   } else {
-    logger.info('Voice message support disabled (GROQ_API_KEY not set)');
+    logger.info('Voice support disabled (GROQ_API_KEY not set)');
+
+    // Text messages without TTS
+    bot.on('message:text', createMessageHandler(processUserMessage));
   }
 
   // Handle errors
