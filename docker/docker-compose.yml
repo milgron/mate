@@ -20,9 +20,12 @@ services:
     tmpfs:
       - /tmp:size=64m,noexec,nosuid,nodev
 
-    # Volume for update trigger (allows bot to trigger self-updates)
+    # Volumes
     volumes:
+      # Update trigger (allows bot to trigger self-updates)
       - /var/jarvis:/var/jarvis
+      # Persistent data storage (memory, conversations, notes, logs)
+      - ../data:/app/data
 
     # Environment variables (loaded from ../.env via env_file)
     environment:

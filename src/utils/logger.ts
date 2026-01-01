@@ -1,13 +1,23 @@
 import fs from 'fs';
 import path from 'path';
 
-const LOG_DIR = process.env.LOG_DIR || '/tmp/jarvis';
+const DATA_DIR = process.env.DATA_DIR || '/app/data';
+const LOG_DIR = path.join(DATA_DIR, 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'jarvis.log');
 const MAX_LOG_SIZE = 1024 * 1024; // 1MB
 
-// Ensure log directory exists
-if (!fs.existsSync(LOG_DIR)) {
-  fs.mkdirSync(LOG_DIR, { recursive: true });
+// Track if file logging is available
+let fileLoggingEnabled = false;
+
+// Try to ensure log directory exists
+try {
+  if (!fs.existsSync(LOG_DIR)) {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+  }
+  fileLoggingEnabled = true;
+} catch {
+  // File logging not available (e.g., in tests or when path doesn't exist)
+  fileLoggingEnabled = false;
 }
 
 type LogLevel = 'info' | 'warn' | 'error' | 'debug';
@@ -36,8 +46,13 @@ function rotateIfNeeded(): void {
 }
 
 function writeToFile(formatted: string): void {
-  rotateIfNeeded();
-  fs.appendFileSync(LOG_FILE, formatted + '\n');
+  if (!fileLoggingEnabled) return;
+  try {
+    rotateIfNeeded();
+    fs.appendFileSync(LOG_FILE, formatted + '\n');
+  } catch {
+    // Ignore write errors
+  }
 }
 
 export const logger = {
@@ -72,6 +87,9 @@ export const logger = {
   },
 
   readLastLines(count: number = 50): string {
+    if (!fileLoggingEnabled) {
+      return 'File logging not available. Check Docker logs instead.';
+    }
     try {
       if (!fs.existsSync(LOG_FILE)) {
         return 'No logs available yet.';

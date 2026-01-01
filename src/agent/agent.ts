@@ -4,6 +4,7 @@ import { BashTool } from './tools/bash.js';
 import { FileTool } from './tools/file.js';
 import { UpdateTool } from './tools/update.js';
 import { LogsTool } from './tools/logs.js';
+import { MemoryTool } from './tools/memory.js';
 
 export interface AgentConfig {
   apiKey: string;
@@ -53,8 +54,17 @@ const DEFAULT_BOT_NAME = 'clanker';
 
 function getDefaultSystemPrompt(botName: string): string {
   return `You are ${botName}, a helpful AI assistant running on a Raspberry Pi.
-You can execute shell commands and manage files when needed.
-Be concise and helpful. If you need to use a tool, explain what you're doing.`;
+
+You have persistent memory that survives across sessions. Use the remember/recall tools to store important information about the user, their preferences, and anything they want you to remember.
+
+You can:
+- Execute shell commands (bash)
+- Read/write files (including to /app/data for persistent storage)
+- Remember facts about the user (remember, recall, list_memories, forget)
+- Check application logs (logs)
+- Trigger self-updates (self_update)
+
+Be concise and helpful. Proactively remember important things the user tells you.`;
 }
 
 /**
@@ -72,12 +82,12 @@ export function createAgent(config: AgentConfig): Agent {
 
   // Initialize tools with sensible defaults
   const bashTool = new BashTool({
-    allowedCommands: ['echo', 'ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'date', 'whoami'],
+    allowedCommands: ['echo', 'ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'date', 'whoami', 'git'],
     timeoutMs: 30000,
   });
 
   const fileTool = new FileTool({
-    allowedPaths: [process.cwd(), '/tmp'],
+    allowedPaths: [process.cwd(), '/tmp', '/app/data'],
   });
 
   const updateTool = new UpdateTool({
@@ -86,12 +96,15 @@ export function createAgent(config: AgentConfig): Agent {
 
   const logsTool = new LogsTool(100);
 
+  const memoryTool = new MemoryTool();
+
   // Build tool definitions
   const tools = [
     bashTool.getToolDefinition(),
     ...fileTool.getToolDefinitions(),
     updateTool.getToolDefinition(),
     logsTool.getToolDefinition(),
+    ...memoryTool.getToolDefinitions(),
   ];
 
   /**
@@ -139,6 +152,33 @@ export function createAgent(config: AgentConfig): Agent {
           ? logsResult.logs ?? 'No logs available'
           : `Error: ${logsResult.error}`;
 
+      case 'remember':
+        const rememberResult = await memoryTool.remember({
+          key: input.key as string,
+          value: input.value as string,
+        });
+        return rememberResult.success
+          ? String(rememberResult.data)
+          : `Error: ${rememberResult.error}`;
+
+      case 'recall':
+        const recallResult = await memoryTool.recall({ key: input.key as string });
+        if (!recallResult.success) return `Error: ${recallResult.error}`;
+        if (recallResult.data === null) return `No memory found for key: ${input.key}`;
+        return JSON.stringify(recallResult.data, null, 2);
+
+      case 'list_memories':
+        const listMemoriesResult = await memoryTool.listMemories();
+        return listMemoriesResult.success
+          ? JSON.stringify(listMemoriesResult.data, null, 2)
+          : `Error: ${listMemoriesResult.error}`;
+
+      case 'forget':
+        const forgetResult = await memoryTool.forget({ key: input.key as string });
+        return forgetResult.success
+          ? String(forgetResult.data)
+          : `Error: ${forgetResult.error}`;
+
       default:
         return `Unknown tool: ${name}`;
     }
@@ -148,6 +188,9 @@ export function createAgent(config: AgentConfig): Agent {
    * Processes a message and returns the response.
    */
   async function processMessage(userId: string, message: string): Promise<string> {
+    // Set user context for memory tool
+    memoryTool.setUser(userId);
+
     // Check for thinking mode trigger
     const { useThinking, cleanMessage } = parseThinkingRequest(message);
     const model = useThinking
