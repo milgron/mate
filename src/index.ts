@@ -20,6 +20,7 @@ const config = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   allowedUsers: process.env.TELEGRAM_ALLOWED_USERS ?? '',
   groqApiKey: process.env.GROQ_API_KEY,
+  botName: process.env.BOT_NAME ?? 'clanker',
 };
 
 // Validate required environment variables
@@ -39,7 +40,7 @@ if (!config.allowedUsers) {
 }
 
 async function main() {
-  logger.info('Starting Jarvis...');
+  logger.info(`Starting ${config.botName}...`);
 
   // Initialize security
   const whitelist = UserWhitelist.fromString(config.allowedUsers);
@@ -48,6 +49,7 @@ async function main() {
   // Initialize Claude agent (Haiku by default, Opus for "think hard")
   const agent = createAgent({
     apiKey: config.anthropicApiKey!,
+    botName: config.botName,
   });
   logger.info('Claude agent initialized (Haiku default, Opus for "think hard")');
 
@@ -70,7 +72,7 @@ async function main() {
       : '';
 
     await ctx.reply(
-      'Hello! I am Jarvis, your AI assistant.\n\n' +
+      `Hello! I am ${config.botName}, your AI assistant.\n\n` +
         'Send me a message and I will help you.\n' +
         'I can execute shell commands and manage files.\n' +
         voiceSupport +
@@ -112,7 +114,7 @@ async function main() {
     };
 
     const status = [
-      '📊 Jarvis Status',
+      `📊 ${config.botName} Status`,
       '',
       '▸ Models',
       '  Default: Haiku',
@@ -174,7 +176,7 @@ async function main() {
 
   // Start bot
   const stop = await startBot(bot);
-  logger.info('Jarvis is running!');
+  logger.info(`${config.botName} is running!`);
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {

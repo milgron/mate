@@ -11,6 +11,7 @@ export interface AgentConfig {
   thinkingModel?: string;
   systemPrompt?: string;
   maxTokens?: number;
+  botName?: string;
 }
 
 const MODELS = {
@@ -48,9 +49,13 @@ export interface Agent {
   clearHistory: (userId: string) => void;
 }
 
-const DEFAULT_SYSTEM_PROMPT = `You are Jarvis, a helpful AI assistant running on a Raspberry Pi.
+const DEFAULT_BOT_NAME = 'clanker';
+
+function getDefaultSystemPrompt(botName: string): string {
+  return `You are ${botName}, a helpful AI assistant running on a Raspberry Pi.
 You can execute shell commands and manage files when needed.
 Be concise and helpful. If you need to use a tool, explain what you're doing.`;
+}
 
 /**
  * Creates a Claude agent with tools and conversation memory.
@@ -59,6 +64,9 @@ export function createAgent(config: AgentConfig): Agent {
   const client = new Anthropic({
     apiKey: config.apiKey,
   });
+
+  const botName = config.botName ?? DEFAULT_BOT_NAME;
+  const systemPrompt = config.systemPrompt ?? getDefaultSystemPrompt(botName);
 
   const memory = new ConversationMemory({ maxMessages: 50 });
 
@@ -159,7 +167,7 @@ export function createAgent(config: AgentConfig): Agent {
     let response = await client.messages.create({
       model,
       max_tokens: config.maxTokens ?? (useThinking ? 4096 : 1024),
-      system: config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+      system: systemPrompt,
       messages,
       tools,
     });
@@ -188,7 +196,7 @@ export function createAgent(config: AgentConfig): Agent {
       response = await client.messages.create({
         model,
         max_tokens: config.maxTokens ?? (useThinking ? 4096 : 1024),
-        system: config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+        system: systemPrompt,
         messages: [
           ...messages,
           { role: 'user', content: toolResults as unknown as string },
