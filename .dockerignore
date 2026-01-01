@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build output (will be built in container)
+dist/
+
+# Development files
+.git/
+.gitignore
+*.md
+.env*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# Tests
+tests/
+coverage/
+vitest.config.ts
+
+# Docker files (avoid recursive copy)
+docker/
+
+# OS
+.DS_Store

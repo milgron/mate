@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "post-tool-use": [
+      {
+        "matcher": "Edit|Write",
+        "command": "npm run test:run && npm run deploy",
+        "description": "Run tests and deploy to Pi after code changes"
+      }
+    ]
+  }
+}

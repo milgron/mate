@@ -1,0 +1,59 @@
+services:
+  jarvis:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: jarvis
+    restart: unless-stopped
+    env_file:
+      - ../.env
+
+    # Security hardening
+    user: "1001:1001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # Temp filesystem for runtime needs
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+
+    # Environment variables (loaded from ../.env via env_file)
+    environment:
+      - NODE_ENV=production
+
+    # Resource limits (suitable for Pi Zero 2 W)
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 300M
+        reservations:
+          memory: 150M
+
+    # Logging
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Development service with hot reload
+  jarvis-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    container_name: jarvis-dev
+    profiles:
+      - dev
+
+    volumes:
+      - ../src:/app/src:ro
+      - ../package.json:/app/package.json:ro
+
+    env_file:
+      - ../.env
+    environment:
+      - NODE_ENV=development

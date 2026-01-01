@@ -1,0 +1,23 @@
+# Development Dockerfile with hot reload
+FROM node:20-alpine
+
+# Install development tools
+RUN apk add --no-cache tini
+
+WORKDIR /app
+
+# Install all dependencies (including dev)
+COPY package*.json ./
+RUN npm ci
+
+# Copy TypeScript config
+COPY tsconfig.json ./
+
+# Copy source (will be overwritten by volume mount)
+COPY src ./src
+
+# Use tini as init
+ENTRYPOINT ["/sbin/tini", "--"]
+
+# Start with hot reload
+CMD ["npm", "run", "dev"]
