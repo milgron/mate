@@ -148,7 +148,7 @@ async function main() {
   const processUserMessage = async (userId: string, message: string) => {
     logger.info('Processing message', { userId, length: message.length });
     const response = await agent.processMessage(userId, message);
-    logger.info('Message processed', { userId, responseLength: response.length });
+    logger.info('Message processed', { userId, responseLength: response.text.length, hasSpeech: !!response.speakText });
     return response;
   };
 

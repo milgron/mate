@@ -1,62 +1,9 @@
 import { Context, InputFile } from 'grammy';
+import type { AgentResponse } from '../agent/agent.js';
 
-export type MessageProcessor = (userId: string, message: string) => Promise<string>;
+export type MessageProcessor = (userId: string, message: string) => Promise<AgentResponse>;
 export type VoiceTranscriber = (fileUrl: string) => Promise<{ success: boolean; text?: string; error?: string }>;
 export type TextToSpeech = (text: string) => Promise<{ success: boolean; audioPath?: string; error?: string }>;
-
-// Phrases that trigger voice response
-const VOICE_TRIGGERS = [
-  // English - flexible variations
-  'reply with voice',
-  'reply with audio',
-  'reply with a voice',
-  'reply with a audio',
-  'respond with voice',
-  'respond with audio',
-  'respond with a voice',
-  'respond with a audio',
-  'voice response',
-  'audio response',
-  'voice audio',
-  'with voice',
-  'with audio',
-  'speak this',
-  'say this',
-  'read aloud',
-  'read this aloud',
-  'tell me aloud',
-  'send voice',
-  'send audio',
-  'as voice',
-  'as audio',
-  // Spanish
-  'con voz',
-  'responde con voz',
-  'responde con audio',
-  'dime en voz',
-  'leelo en voz alta',
-  'en audio',
-];
-
-/**
- * Detects if user wants a voice response based on their message.
- */
-function wantsVoiceResponse(message: string): boolean {
-  const lower = message.toLowerCase();
-  return VOICE_TRIGGERS.some(trigger => lower.includes(trigger));
-}
-
-/**
- * Removes voice trigger phrases from the message.
- */
-function stripVoiceTrigger(message: string): string {
-  let result = message;
-  for (const trigger of VOICE_TRIGGERS) {
-    const regex = new RegExp(trigger, 'gi');
-    result = result.replace(regex, '');
-  }
-  return result.trim();
-}
 
 /**
  * Strips markdown formatting from text for plain Telegram display.
@@ -105,7 +52,7 @@ export async function handleMessage(
 
   try {
     const response = await processMessage(String(userId), text);
-    await ctx.reply(stripMarkdown(response));
+    await ctx.reply(stripMarkdown(response.text));
   } catch (error) {
     console.error('Error processing message:', error);
     await ctx.reply('Sorry, an error occurred while processing your message.');
@@ -123,7 +70,7 @@ export function createMessageHandler(processMessage: MessageProcessor) {
 
 /**
  * Handles incoming text messages with optional TTS support.
- * If user requests voice response and TTS is available, sends audio.
+ * If the agent uses the speak tool, sends audio response.
  */
 export async function handleMessageWithTTS(
   ctx: Context,
@@ -138,20 +85,14 @@ export async function handleMessageWithTTS(
     return;
   }
 
-  const requestsVoice = wantsVoiceResponse(text);
-  const cleanedMessage = requestsVoice ? stripVoiceTrigger(text) : text;
-
-  // If the message is empty after stripping triggers, use original
-  const messageToProcess = cleanedMessage || text;
-
   try {
-    const response = await processMessage(String(userId), messageToProcess);
+    const response = await processMessage(String(userId), text);
 
-    if (requestsVoice) {
-      // User wants voice response
+    // Check if the agent used the speak tool
+    if (response.speakText) {
       await ctx.reply('🔊 Generating audio...');
 
-      const result = await synthesize(response);
+      const result = await synthesize(response.speakText);
 
       if (result.success && result.audioPath) {
         try {
@@ -162,11 +103,11 @@ export async function handleMessageWithTTS(
       } else {
         // Fallback to text if TTS fails
         await ctx.reply(`❌ Audio generation failed: ${result.error || 'Unknown error'}`);
-        await ctx.reply(stripMarkdown(response));
+        await ctx.reply(stripMarkdown(response.speakText));
       }
     } else {
       // Normal text response
-      await ctx.reply(stripMarkdown(response));
+      await ctx.reply(stripMarkdown(response.text));
     }
   } catch (error) {
     console.error('Error processing message:', error);
@@ -224,7 +165,7 @@ export async function handleVoiceMessage(
 
     // Process with Claude
     const response = await processMessage(String(userId), result.text);
-    await ctx.reply(stripMarkdown(response));
+    await ctx.reply(stripMarkdown(response.text));
   } catch (error) {
     console.error('Error processing voice message:', error);
     await ctx.reply('Sorry, an error occurred while processing your voice message.');
@@ -245,7 +186,7 @@ export function createVoiceHandler(
 
 /**
  * Handles incoming voice messages with optional TTS response.
- * If user mentions wanting voice response, replies with audio.
+ * If the agent uses the speak tool, replies with audio.
  */
 export async function handleVoiceMessageWithTTS(
   ctx: Context,
@@ -276,16 +217,13 @@ export async function handleVoiceMessageWithTTS(
 
     await ctx.reply(`📝 "${result.text}"`);
 
-    const requestsVoice = wantsVoiceResponse(result.text);
-    const cleanedMessage = requestsVoice ? stripVoiceTrigger(result.text) : result.text;
-    const messageToProcess = cleanedMessage || result.text;
+    const response = await processMessage(String(userId), result.text);
 
-    const response = await processMessage(String(userId), messageToProcess);
-
-    if (requestsVoice) {
+    // Check if the agent used the speak tool
+    if (response.speakText) {
       await ctx.reply('🔊 Generating audio...');
 
-      const ttsResult = await synthesize(response);
+      const ttsResult = await synthesize(response.speakText);
 
       if (ttsResult.success && ttsResult.audioPath) {
         try {
@@ -295,10 +233,10 @@ export async function handleVoiceMessageWithTTS(
         }
       } else {
         await ctx.reply(`❌ Audio generation failed: ${ttsResult.error || 'Unknown error'}`);
-        await ctx.reply(stripMarkdown(response));
+        await ctx.reply(stripMarkdown(response.speakText));
       }
     } else {
-      await ctx.reply(stripMarkdown(response));
+      await ctx.reply(stripMarkdown(response.text));
     }
   } catch (error) {
     console.error('Error processing voice message:', error);

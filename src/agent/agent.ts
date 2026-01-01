@@ -5,6 +5,7 @@ import { FileTool } from './tools/file.js';
 import { UpdateTool } from './tools/update.js';
 import { LogsTool } from './tools/logs.js';
 import { MemoryTool } from './tools/memory.js';
+import { SpeakTool } from './tools/speak.js';
 import { loadPersonality, personalityToPrompt } from './personality.js';
 
 export interface AgentConfig {
@@ -44,9 +45,14 @@ function parseThinkingRequest(message: string): { useThinking: boolean; cleanMes
   return { useThinking: false, cleanMessage: message };
 }
 
+export interface AgentResponse {
+  text: string;
+  speakText?: string; // If set, this text should be synthesized as audio
+}
+
 export interface Agent {
   config: AgentConfig & { model: string };
-  processMessage: (userId: string, message: string) => Promise<string>;
+  processMessage: (userId: string, message: string) => Promise<AgentResponse>;
   getHistory: (userId: string) => Message[];
   clearHistory: (userId: string) => void;
 }
@@ -59,7 +65,7 @@ function buildSystemPrompt(voiceEnabled: boolean = false): string {
   const personalitySection = personalityToPrompt(personality);
 
   const voiceCapability = voiceEnabled
-    ? `- Send voice/audio responses when users ask (triggers include: "with voice", "with audio", "voice response", "send voice", "as audio", "read aloud", "con voz", etc.)`
+    ? `- Send voice/audio responses using the "speak" tool when users ask for audio, voice messages, or want you to talk/speak to them`
     : '';
 
   const capabilitiesSection = `
@@ -82,7 +88,7 @@ You can:
 - Trigger self-updates (self_update)
 ${voiceCapability}
 
-${voiceEnabled ? 'When users request voice responses, just respond normally with text - the system will automatically convert your response to audio.' : ''}
+${voiceEnabled ? 'When users request voice/audio responses (e.g., "send me an audio", "reply with voice", "talk to me", "speak to me", "con voz", "mandame audio"), use the "speak" tool with the text you want to say. The text will be converted to speech and sent as an audio message.' : ''}
 
 Proactively remember important things the user tells you.`;
 
@@ -119,6 +125,8 @@ export function createAgent(config: AgentConfig): Agent {
 
   const memoryTool = new MemoryTool();
 
+  const speakTool = config.voiceEnabled ? new SpeakTool() : null;
+
   // Build tool definitions
   const tools = [
     bashTool.getToolDefinition(),
@@ -126,6 +134,7 @@ export function createAgent(config: AgentConfig): Agent {
     updateTool.getToolDefinition(),
     logsTool.getToolDefinition(),
     ...memoryTool.getToolDefinitions(),
+    ...(speakTool ? [speakTool.getToolDefinition()] : []),
   ];
 
   /**
@@ -219,6 +228,15 @@ export function createAgent(config: AgentConfig): Agent {
           ? String(moveResult.data)
           : `Error: ${moveResult.error}`;
 
+      case 'speak':
+        if (speakTool) {
+          const speakResult = speakTool.execute({ text: input.text as string });
+          return speakResult.success
+            ? 'Audio response queued. The user will receive your message as a voice note.'
+            : 'Failed to queue audio response';
+        }
+        return 'Voice responses are not enabled';
+
       default:
         return `Unknown tool: ${name}`;
     }
@@ -227,9 +245,12 @@ export function createAgent(config: AgentConfig): Agent {
   /**
    * Processes a message and returns the response.
    */
-  async function processMessage(userId: string, message: string): Promise<string> {
+  async function processMessage(userId: string, message: string): Promise<AgentResponse> {
     // Set user context for memory tool
     memoryTool.setUser(userId);
+
+    // Clear any pending speech from previous messages
+    speakTool?.clear();
 
     // Check for thinking mode trigger
     const { useThinking, cleanMessage } = parseThinkingRequest(message);
@@ -297,7 +318,10 @@ export function createAgent(config: AgentConfig): Agent {
     // Add assistant response to memory
     memory.addMessage(userId, { role: 'assistant', content: responseText });
 
-    return responseText;
+    // Check if the agent used the speak tool
+    const speakText = speakTool?.consumePendingSpeech() ?? undefined;
+
+    return { text: responseText, speakText };
   }
 
   return {
