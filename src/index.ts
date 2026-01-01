@@ -8,8 +8,8 @@ import {
 import { createMessageHandler, createVoiceHandler } from './telegram/handlers.js';
 import { createAgent } from './agent/agent.js';
 import { UserWhitelist } from './security/whitelist.js';
-import { AuditLogger } from './security/audit.js';
 import { GroqTranscriber } from './integrations/transcription.js';
+import { logger } from './utils/logger.js';
 
 // Track bot start time for uptime calculation
 const botStartTime = Date.now();
@@ -24,34 +24,32 @@ const config = {
 
 // Validate required environment variables
 if (!config.telegramToken) {
-  console.error('Error: TELEGRAM_BOT_TOKEN is required');
+  logger.error('TELEGRAM_BOT_TOKEN is required');
   process.exit(1);
 }
 
 if (!config.anthropicApiKey) {
-  console.error('Error: ANTHROPIC_API_KEY is required');
+  logger.error('ANTHROPIC_API_KEY is required');
   process.exit(1);
 }
 
 if (!config.allowedUsers) {
-  console.error('Error: TELEGRAM_ALLOWED_USERS is required');
+  logger.error('TELEGRAM_ALLOWED_USERS is required');
   process.exit(1);
 }
 
 async function main() {
-  console.log('Starting Jarvis...');
+  logger.info('Starting Jarvis...');
 
   // Initialize security
   const whitelist = UserWhitelist.fromString(config.allowedUsers);
-  console.log(`Loaded ${whitelist.size} allowed users`);
-
-  const auditLogger = AuditLogger.createConsoleLogger();
+  logger.info(`Loaded ${whitelist.size} allowed users`);
 
   // Initialize Claude agent (Haiku by default, Opus for "think hard")
   const agent = createAgent({
     apiKey: config.anthropicApiKey!,
   });
-  console.log('Claude agent initialized (Haiku default, Opus for "think hard")');
+  logger.info('Claude agent initialized (Haiku default, Opus for "think hard")');
 
   // Create Telegram bot
   const bot = createBot(config.telegramToken!);
@@ -61,21 +59,17 @@ async function main() {
   bot.use(createRateLimitMiddleware({ capacity: 10, refillRate: 0.5 }));
   bot.use(
     createLoggingMiddleware((userId, message) => {
-      auditLogger.logAction('message_received', userId, {
-        preview: message.slice(0, 100),
-      });
+      logger.info('Message received', { userId, preview: message.slice(0, 100) });
     })
   );
 
   // Handle text messages
   bot.on('message:text', createMessageHandler(async (userId, message) => {
-    auditLogger.logAction('processing_message', userId, { length: message.length });
+    logger.info('Processing message', { userId, length: message.length });
 
     const response = await agent.processMessage(userId, message);
 
-    auditLogger.logAction('message_processed', userId, {
-      responseLength: response.length,
-    });
+    logger.info('Message processed', { userId, responseLength: response.length });
 
     return response;
   }));
@@ -83,24 +77,22 @@ async function main() {
   // Handle voice messages (if Groq API key is configured)
   if (config.groqApiKey) {
     const transcriber = new GroqTranscriber(config.groqApiKey);
-    console.log('Voice message support enabled (Groq Whisper)');
+    logger.info('Voice message support enabled (Groq Whisper)');
 
     bot.on('message:voice', createVoiceHandler(
       (fileUrl) => transcriber.transcribeFromUrl(fileUrl),
       async (userId, message) => {
-        auditLogger.logAction('processing_voice_message', userId, { length: message.length });
+        logger.info('Processing voice message', { userId, length: message.length });
 
         const response = await agent.processMessage(userId, message);
 
-        auditLogger.logAction('voice_message_processed', userId, {
-          responseLength: response.length,
-        });
+        logger.info('Voice message processed', { userId, responseLength: response.length });
 
         return response;
       }
     ));
   } else {
-    console.log('Voice message support disabled (GROQ_API_KEY not set)');
+    logger.info('Voice message support disabled (GROQ_API_KEY not set)');
   }
 
   // Handle /start command
@@ -177,16 +169,16 @@ async function main() {
 
   // Handle errors
   bot.catch((err) => {
-    console.error('Bot error:', err);
+    logger.error('Bot error', { error: String(err) });
   });
 
   // Start bot
   const stop = await startBot(bot);
-  console.log('Jarvis is running!');
+  logger.info('Jarvis is running!');
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
-    console.log(`\n${signal} received. Shutting down...`);
+    logger.info(`${signal} received. Shutting down...`);
     await stop();
     process.exit(0);
   };
@@ -196,6 +188,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('Fatal error:', err);
+  logger.error('Fatal error', { error: String(err) });
   process.exit(1);
 });

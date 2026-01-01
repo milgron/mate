@@ -3,6 +3,7 @@ import { ConversationMemory, Message } from './memory.js';
 import { BashTool } from './tools/bash.js';
 import { FileTool } from './tools/file.js';
 import { UpdateTool } from './tools/update.js';
+import { LogsTool } from './tools/logs.js';
 
 export interface AgentConfig {
   apiKey: string;
@@ -75,11 +76,14 @@ export function createAgent(config: AgentConfig): Agent {
     triggerPath: '/var/jarvis/update-trigger',
   });
 
+  const logsTool = new LogsTool(100);
+
   // Build tool definitions
   const tools = [
     bashTool.getToolDefinition(),
     ...fileTool.getToolDefinitions(),
     updateTool.getToolDefinition(),
+    logsTool.getToolDefinition(),
   ];
 
   /**
@@ -120,6 +124,12 @@ export function createAgent(config: AgentConfig): Agent {
       case 'self_update':
         const updateResult = await updateTool.trigger();
         return updateResult.message;
+
+      case 'logs':
+        const logsResult = await logsTool.execute({ lines: input.lines as number });
+        return logsResult.success
+          ? logsResult.logs ?? 'No logs available'
+          : `Error: ${logsResult.error}`;
 
       default:
         return `Unknown tool: ${name}`;
