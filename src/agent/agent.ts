@@ -55,12 +55,19 @@ const DEFAULT_BOT_NAME = 'clanker';
 function getDefaultSystemPrompt(botName: string): string {
   return `You are ${botName}, a helpful AI assistant running on a Raspberry Pi.
 
-You have persistent memory that survives across sessions. Use the remember/recall tools to store important information about the user, their preferences, and anything they want you to remember.
+You have persistent memory organized into categories that survives across sessions:
+- todo: Tasks and action items to complete
+- posts: Blog posts and content ideas
+- today: Today's tasks (subset of todo for current day)
+- memory: Important facts and things to remember
+- random: Everything else
+
+Use the remember/recall tools to store important information. When the user asks you to add tasks or todos, use category "todo". When they say "add to today" or "do this today", use category "today" or move items from todo to today with move_memory.
 
 You can:
 - Execute shell commands (bash)
 - Read/write files (including to /app/data for persistent storage)
-- Remember facts about the user (remember, recall, list_memories, forget)
+- Remember facts by category (remember, recall, list_memories, forget, move_memory)
 - Check application logs (logs)
 - Trigger self-updates (self_update)
 
@@ -156,28 +163,47 @@ export function createAgent(config: AgentConfig): Agent {
         const rememberResult = await memoryTool.remember({
           key: input.key as string,
           value: input.value as string,
+          category: input.category as string | undefined,
         });
         return rememberResult.success
           ? String(rememberResult.data)
           : `Error: ${rememberResult.error}`;
 
       case 'recall':
-        const recallResult = await memoryTool.recall({ key: input.key as string });
+        const recallResult = await memoryTool.recall({
+          key: input.key as string,
+          category: input.category as string | undefined,
+        });
         if (!recallResult.success) return `Error: ${recallResult.error}`;
         if (recallResult.data === null) return `No memory found for key: ${input.key}`;
         return JSON.stringify(recallResult.data, null, 2);
 
       case 'list_memories':
-        const listMemoriesResult = await memoryTool.listMemories();
+        const listMemoriesResult = await memoryTool.listMemories({
+          category: input.category as string | undefined,
+        });
         return listMemoriesResult.success
           ? JSON.stringify(listMemoriesResult.data, null, 2)
           : `Error: ${listMemoriesResult.error}`;
 
       case 'forget':
-        const forgetResult = await memoryTool.forget({ key: input.key as string });
+        const forgetResult = await memoryTool.forget({
+          key: input.key as string,
+          category: input.category as string | undefined,
+        });
         return forgetResult.success
           ? String(forgetResult.data)
           : `Error: ${forgetResult.error}`;
+
+      case 'move_memory':
+        const moveResult = await memoryTool.moveMemory({
+          key: input.key as string,
+          fromCategory: input.fromCategory as string,
+          toCategory: input.toCategory as string,
+        });
+        return moveResult.success
+          ? String(moveResult.data)
+          : `Error: ${moveResult.error}`;
 
       default:
         return `Unknown tool: ${name}`;
