@@ -4,6 +4,35 @@ export type MessageProcessor = (userId: string, message: string) => Promise<stri
 export type VoiceTranscriber = (fileUrl: string) => Promise<{ success: boolean; text?: string; error?: string }>;
 
 /**
+ * Strips markdown formatting from text for plain Telegram display.
+ * Removes: **bold**, *italic*, `code`, ```code blocks```, [links](url), headers
+ */
+function stripMarkdown(text: string): string {
+  return text
+    // Remove code blocks first (```...```)
+    .replace(/```[\s\S]*?```/g, (match) => match.slice(3, -3).trim())
+    // Remove inline code (`...`)
+    .replace(/`([^`]+)`/g, '$1')
+    // Remove bold (**...**)
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    // Remove bold (__)
+    .replace(/__([^_]+)__/g, '$1')
+    // Remove italic (*...*)
+    .replace(/\*([^*]+)\*/g, '$1')
+    // Remove italic (_..._)
+    .replace(/_([^_]+)_/g, '$1')
+    // Remove strikethrough (~~...~~)
+    .replace(/~~([^~]+)~~/g, '$1')
+    // Remove markdown links [text](url) -> text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    // Remove markdown headers (# Header)
+    .replace(/^#{1,6}\s+/gm, '')
+    // Clean up any double spaces
+    .replace(/  +/g, ' ')
+    .trim();
+}
+
+/**
  * Handles incoming text messages.
  * Passes the message to the processor and replies with the result.
  */
@@ -21,7 +50,7 @@ export async function handleMessage(
 
   try {
     const response = await processMessage(String(userId), text);
-    await ctx.reply(response);
+    await ctx.reply(stripMarkdown(response));
   } catch (error) {
     console.error('Error processing message:', error);
     await ctx.reply('Sorry, an error occurred while processing your message.');
@@ -74,7 +103,7 @@ export async function handleVoiceMessage(
 
     // Process with Claude
     const response = await processMessage(String(userId), result.text);
-    await ctx.reply(response);
+    await ctx.reply(stripMarkdown(response));
   } catch (error) {
     console.error('Error processing voice message:', error);
     await ctx.reply('Sorry, an error occurred while processing your voice message.');

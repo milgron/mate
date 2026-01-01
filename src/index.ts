@@ -152,27 +152,27 @@ async function main() {
     };
 
     const status = [
-      '📊 *Jarvis Status*',
+      '📊 Jarvis Status',
       '',
-      '*Models*',
-      '├ Default: Haiku',
-      '└ Thinking: Opus',
+      '▸ Models',
+      '  Default: Haiku',
+      '  Thinking: Opus',
       '',
-      '*Your Session*',
-      `└ Messages: ${historyLength}`,
+      '▸ Your Session',
+      `  Messages: ${historyLength}`,
       '',
-      '*System*',
-      `├ Pi uptime: ${formatTime(uptime)}`,
-      `├ Memory: ${memUsedPercent}% used`,
-      `├ Load: ${loadAvg}`,
-      `└ Bot uptime: ${formatTime(botUptime)}`,
+      '▸ System',
+      `  Pi uptime: ${formatTime(uptime)}`,
+      `  Memory: ${memUsedPercent}% used`,
+      `  Load: ${loadAvg}`,
+      `  Bot uptime: ${formatTime(botUptime)}`,
       '',
-      '*Features*',
-      `├ Voice: ${config.groqApiKey ? '✓' : '✗'}`,
-      `└ Users: ${whitelist.size}`,
+      '▸ Features',
+      `  Voice: ${config.groqApiKey ? '✓' : '✗'}`,
+      `  Users: ${whitelist.size}`,
     ].join('\n');
 
-    await ctx.reply(status, { parse_mode: 'Markdown' });
+    await ctx.reply(status);
   });
 
   // Handle errors
