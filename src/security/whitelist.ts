@@ -51,4 +51,11 @@ export class UserWhitelist {
   get size(): number {
     return this.allowedUsers.size;
   }
+
+  /**
+   * Returns all user IDs in the whitelist.
+   */
+  getAllUserIds(): string[] {
+    return Array.from(this.allowedUsers);
+  }
 }

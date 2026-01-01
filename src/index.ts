@@ -178,6 +178,17 @@ async function main() {
   const stop = await startBot(bot);
   logger.info(`${config.botName} is running!`);
 
+  // Notify all whitelisted users that bot is ready
+  const startupMessage = `🤖 ${config.botName} is back online and ready!`;
+  for (const userId of whitelist.getAllUserIds()) {
+    try {
+      await bot.api.sendMessage(userId, startupMessage);
+      logger.info('Sent startup notification', { userId });
+    } catch (err) {
+      logger.warn('Failed to send startup notification', { userId, error: String(err) });
+    }
+  }
+
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     logger.info(`${signal} received. Shutting down...`);
