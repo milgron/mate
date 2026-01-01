@@ -141,7 +141,7 @@ async function main() {
     const freeMem = os.freemem();
     const totalMem = os.totalmem();
     const memUsedPercent = ((1 - freeMem / totalMem) * 100).toFixed(1);
-    const loadAvg = os.loadavg()[0].toFixed(2);
+    const loadAvg = (os.loadavg()[0] ?? 0).toFixed(2);
     const botUptime = Math.floor((Date.now() - botStartTime) / 1000);
 
     const formatTime = (seconds: number) => {
