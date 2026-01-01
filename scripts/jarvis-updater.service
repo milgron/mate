@@ -1,0 +1,32 @@
+[Unit]
+Description=Jarvis Auto-Updater
+Documentation=https://github.com/your-repo/jarvis
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ale
+Group=ale
+WorkingDirectory=/home/ale/jarvis
+
+# Create trigger directory with correct permissions before starting
+ExecStartPre=/bin/bash -c 'sudo mkdir -p /var/jarvis && sudo chown 1001:1001 /var/jarvis'
+ExecStart=/home/ale/jarvis/scripts/auto-update.sh --daemon
+Restart=always
+RestartSec=10
+
+# Environment
+Environment=REPO_DIR=/home/ale/jarvis
+Environment=POLL_INTERVAL=60
+Environment=BRANCH=main
+Environment=TRIGGER_FILE=/var/jarvis/update-trigger
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jarvis-updater
+
+[Install]
+WantedBy=multi-user.target

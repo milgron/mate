@@ -109,6 +109,81 @@ scp -r /Users/ale/Desktop/projects/jarvis ale@alfajor.local:~/ && \
 ssh ale@alfajor.local "cd ~/jarvis/docker && docker compose up -d --build"
 ```
 
+## Auto-Deploy from GitHub
+
+Two options for automatic deployment when you push to GitHub:
+
+### Option 1: GitHub Actions (Recommended if Pi is accessible)
+
+Requires your Pi to be accessible from the internet (via Tailscale, Cloudflare Tunnel, or port forwarding).
+
+**Setup GitHub Secrets:**
+
+1. Generate SSH key for deployment:
+   ```bash
+   ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/github_deploy
+   ```
+
+2. Add public key to Pi:
+   ```bash
+   ssh-copy-id -i ~/.ssh/github_deploy.pub ale@alfajor.local
+   ```
+
+3. Add these secrets to your GitHub repo (Settings → Secrets → Actions):
+   - `PI_SSH_KEY`: Contents of `~/.ssh/github_deploy` (private key)
+   - `PI_HOST`: Your Pi's public IP or hostname (e.g., via Tailscale)
+   - `PI_HOST_KEY`: Output of `ssh-keyscan <pi-host>`
+
+**How it works:**
+- Push to `main` branch triggers the workflow
+- GitHub Actions runs tests, then SSHs to Pi
+- Syncs code via rsync, rebuilds Docker, restarts container
+
+### Option 2: Pi Polling (If Pi is behind NAT)
+
+The Pi periodically checks GitHub for updates and auto-deploys.
+
+**Initial Setup on Pi:**
+
+```bash
+# Clone repo on Pi (first time only)
+cd ~
+git clone https://github.com/YOUR_USER/jarvis.git
+cd jarvis
+
+# Copy your .env file
+nano .env  # Add your secrets
+
+# Test the auto-update script
+./scripts/auto-update.sh
+```
+
+**Install as systemd service (auto-start on boot):**
+
+```bash
+# Copy service file
+sudo cp scripts/jarvis-updater.service /etc/systemd/system/
+
+# Edit if needed (change username, paths)
+sudo nano /etc/systemd/system/jarvis-updater.service
+
+# Enable and start
+sudo systemctl daemon-reload
+sudo systemctl enable jarvis-updater
+sudo systemctl start jarvis-updater
+
+# Check status
+sudo systemctl status jarvis-updater
+
+# View logs
+journalctl -u jarvis-updater -f
+```
+
+**Configuration (environment variables):**
+- `POLL_INTERVAL`: Seconds between checks (default: 60)
+- `BRANCH`: Git branch to track (default: main)
+- `REPO_DIR`: Path to repo (default: ~/jarvis)
+
 ## Quick Commands
 
 | Task | Command |

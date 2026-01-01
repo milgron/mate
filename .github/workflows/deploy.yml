@@ -1,0 +1,101 @@
+name: Deploy to Raspberry Pi
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  PI_USER: ale
+  PI_PATH: ~/jarvis
+  DOCKER_PATH: ~/jarvis/docker
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run type check
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm run test:run
+
+  deploy:
+    name: Deploy to Pi
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PI_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo "${{ secrets.PI_HOST_KEY }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy to Raspberry Pi
+        env:
+          PI_HOST: ${{ secrets.PI_HOST }}
+        run: |
+          # Sync code to Pi (excluding unnecessary files)
+          rsync -avz --delete \
+            --exclude 'node_modules' \
+            --exclude '.git' \
+            --exclude 'dist' \
+            --exclude 'coverage' \
+            --exclude '.env' \
+            --exclude '*.log' \
+            -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" \
+            ./ ${PI_USER}@${PI_HOST}:${PI_PATH}/
+
+      - name: Rebuild and restart Docker
+        env:
+          PI_HOST: ${{ secrets.PI_HOST }}
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${PI_USER}@${PI_HOST} << 'EOF'
+            cd ~/jarvis/docker
+            echo "🔨 Building Docker image..."
+            docker compose build --no-cache
+            echo "🚀 Starting container..."
+            docker compose up -d
+            echo "📋 Container status:"
+            docker compose ps
+            echo "📜 Recent logs:"
+            docker compose logs --tail 10
+          EOF
+
+      - name: Verify deployment
+        env:
+          PI_HOST: ${{ secrets.PI_HOST }}
+        run: |
+          sleep 10  # Wait for container to start
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${PI_USER}@${PI_HOST} << 'EOF'
+            cd ~/jarvis/docker
+            if docker compose ps | grep -q "healthy\|running"; then
+              echo "✅ Deployment successful!"
+              exit 0
+            else
+              echo "❌ Deployment failed - container not healthy"
+              docker compose logs --tail 30
+              exit 1
+            fi
+          EOF

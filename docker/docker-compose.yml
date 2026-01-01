@@ -20,6 +20,10 @@ services:
     tmpfs:
       - /tmp:size=64m,noexec,nosuid,nodev
 
+    # Volume for update trigger (allows bot to trigger self-updates)
+    volumes:
+      - /var/jarvis:/var/jarvis
+
     # Environment variables (loaded from ../.env via env_file)
     environment:
       - NODE_ENV=production

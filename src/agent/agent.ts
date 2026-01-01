@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { ConversationMemory, Message } from './memory.js';
 import { BashTool } from './tools/bash.js';
 import { FileTool } from './tools/file.js';
+import { UpdateTool } from './tools/update.js';
 
 export interface AgentConfig {
   apiKey: string;
@@ -70,10 +71,15 @@ export function createAgent(config: AgentConfig): Agent {
     allowedPaths: [process.cwd(), '/tmp'],
   });
 
+  const updateTool = new UpdateTool({
+    triggerPath: '/var/jarvis/update-trigger',
+  });
+
   // Build tool definitions
   const tools = [
     bashTool.getToolDefinition(),
     ...fileTool.getToolDefinitions(),
+    updateTool.getToolDefinition(),
   ];
 
   /**
@@ -110,6 +116,10 @@ export function createAgent(config: AgentConfig): Agent {
         return listResult.success
           ? listResult.content ?? ''
           : `Error: ${listResult.error}`;
+
+      case 'self_update':
+        const updateResult = await updateTool.trigger();
+        return updateResult.message;
 
       default:
         return `Unknown tool: ${name}`;
