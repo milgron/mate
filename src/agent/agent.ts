@@ -76,7 +76,7 @@ function buildSystemPrompt(voiceEnabled: boolean = false, hasNotes: boolean = fa
     : '';
 
   const notesInstructions = hasNotes
-    ? `\nWhen users ask you to write a blog post, create content, or publish something, use the create_note tool to publish it directly to Collected Notes. Write the content in markdown format with a # heading as the title. When asked about existing posts, use list_notes or search_notes to find them.`
+    ? `\nIMPORTANT: When users ask you to write a blog post, create content, or publish something, you MUST use the create_note tool to actually publish it to Collected Notes. Do NOT just describe what you would write - actually write the full content and publish it using create_note. The body should be markdown with a # heading as the title.`
     : '';
 
   const capabilitiesSection = `
@@ -161,6 +161,7 @@ export function createAgent(config: AgentConfig): Agent {
     name: string,
     input: Record<string, unknown>
   ): Promise<string> {
+    console.log(`[TOOL] Executing: ${name}`, JSON.stringify(input).slice(0, 200));
     switch (name) {
       case 'bash':
         const bashResult = await bashTool.execute({ command: input.command as string });
