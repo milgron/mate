@@ -334,7 +334,7 @@ export function createAgent(config: AgentConfig): Agent {
     // Call Claude API
     let response = await client.messages.create({
       model,
-      max_tokens: config.maxTokens ?? (useThinking ? 4096 : 1024),
+      max_tokens: config.maxTokens ?? (useThinking ? 8192 : 4096),
       system: systemPrompt,
       messages,
       tools,
@@ -367,7 +367,7 @@ export function createAgent(config: AgentConfig): Agent {
 
       response = await client.messages.create({
         model,
-        max_tokens: config.maxTokens ?? (useThinking ? 4096 : 1024),
+        max_tokens: config.maxTokens ?? (useThinking ? 8192 : 4096),
         system: systemPrompt,
         messages,
         tools,
