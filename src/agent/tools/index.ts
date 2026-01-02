@@ -3,3 +3,4 @@ export { FileTool } from './file.js';
 export { UpdateTool } from './update.js';
 export { LogsTool } from './logs.js';
 export { MemoryTool } from './memory.js';
+export { NotesTool } from './notes.js';

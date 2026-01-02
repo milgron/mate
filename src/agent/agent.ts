@@ -6,6 +6,7 @@ import { UpdateTool } from './tools/update.js';
 import { LogsTool } from './tools/logs.js';
 import { MemoryTool } from './tools/memory.js';
 import { SpeakTool } from './tools/speak.js';
+import { NotesTool } from './tools/notes.js';
 import { loadPersonality, personalityToPrompt } from './personality.js';
 
 export interface AgentConfig {
@@ -15,6 +16,8 @@ export interface AgentConfig {
   systemPrompt?: string;
   maxTokens?: number;
   voiceEnabled?: boolean;
+  collectedNotesApiKey?: string;
+  collectedNotesSitePath?: string;
 }
 
 const MODELS = {
@@ -60,12 +63,16 @@ export interface Agent {
 /**
  * Builds the system prompt by combining personality config with capabilities.
  */
-function buildSystemPrompt(voiceEnabled: boolean = false): string {
+function buildSystemPrompt(voiceEnabled: boolean = false, hasNotes: boolean = false): string {
   const personality = loadPersonality();
   const personalitySection = personalityToPrompt(personality);
 
   const voiceCapability = voiceEnabled
-    ? `- Send voice/audio responses using the "speak" tool when users ask for audio, voice messages, or want you to talk/speak to them`
+    ? `\n- Send voice/audio responses using the "speak" tool when users ask for audio, voice messages, or want you to talk/speak to them`
+    : '';
+
+  const notesCapability = hasNotes
+    ? `\n- Manage blog notes on Collected Notes (list_notes, get_note, create_note, update_note, delete_note, search_notes)`
     : '';
 
   const capabilitiesSection = `
@@ -85,8 +92,7 @@ You can:
 - Read/write files (including to /app/data for persistent storage)
 - Remember facts by category (remember, recall, list_memories, forget, move_memory)
 - Check application logs (logs)
-- Trigger self-updates (self_update)
-${voiceCapability}
+- Trigger self-updates (self_update)${voiceCapability}${notesCapability}
 
 ${voiceEnabled ? 'When users request voice/audio responses (e.g., "send me an audio", "reply with voice", "talk to me", "speak to me", "con voz", "mandame audio"), use the "speak" tool with the text you want to say. The text will be converted to speech and sent as an audio message.' : ''}
 
@@ -103,7 +109,8 @@ export function createAgent(config: AgentConfig): Agent {
     apiKey: config.apiKey,
   });
 
-  const systemPrompt = config.systemPrompt ?? buildSystemPrompt(config.voiceEnabled ?? false);
+  const hasNotesConfig = !!(config.collectedNotesApiKey && config.collectedNotesSitePath);
+  const systemPrompt = config.systemPrompt ?? buildSystemPrompt(config.voiceEnabled ?? false, hasNotesConfig);
 
   const memory = new ConversationMemory({ maxMessages: 50 });
 
@@ -127,6 +134,11 @@ export function createAgent(config: AgentConfig): Agent {
 
   const speakTool = config.voiceEnabled ? new SpeakTool() : null;
 
+  const notesTool = new NotesTool(
+    config.collectedNotesApiKey,
+    config.collectedNotesSitePath
+  );
+
   // Build tool definitions
   const tools = [
     bashTool.getToolDefinition(),
@@ -135,6 +147,7 @@ export function createAgent(config: AgentConfig): Agent {
     logsTool.getToolDefinition(),
     ...memoryTool.getToolDefinitions(),
     ...(speakTool ? [speakTool.getToolDefinition()] : []),
+    ...(notesTool.isConfigured() ? notesTool.getToolDefinitions() : []),
   ];
 
   /**
@@ -236,6 +249,52 @@ export function createAgent(config: AgentConfig): Agent {
             : 'Failed to queue audio response';
         }
         return 'Voice responses are not enabled';
+
+      case 'list_notes':
+        const listNotesResult = await notesTool.listNotes();
+        return listNotesResult.success
+          ? JSON.stringify(listNotesResult.data, null, 2)
+          : `Error: ${listNotesResult.error}`;
+
+      case 'get_note':
+        const getNoteResult = await notesTool.getNote({ path: input.path as string });
+        return getNoteResult.success
+          ? String(getNoteResult.data)
+          : `Error: ${getNoteResult.error}`;
+
+      case 'create_note':
+        const createNoteResult = await notesTool.createNote({
+          body: input.body as string,
+          visibility: input.visibility as 'public' | 'private' | 'public_unlisted' | undefined,
+        });
+        return createNoteResult.success
+          ? JSON.stringify(createNoteResult.data, null, 2)
+          : `Error: ${createNoteResult.error}`;
+
+      case 'update_note':
+        const updateNoteResult = await notesTool.updateNote({
+          path: input.path as string,
+          body: input.body as string,
+          visibility: input.visibility as 'public' | 'private' | 'public_unlisted' | undefined,
+        });
+        return updateNoteResult.success
+          ? JSON.stringify(updateNoteResult.data, null, 2)
+          : `Error: ${updateNoteResult.error}`;
+
+      case 'delete_note':
+        const deleteNoteResult = await notesTool.deleteNote({ path: input.path as string });
+        return deleteNoteResult.success
+          ? JSON.stringify(deleteNoteResult.data, null, 2)
+          : `Error: ${deleteNoteResult.error}`;
+
+      case 'search_notes':
+        const searchNotesResult = await notesTool.searchNotes({
+          query: input.query as string,
+          mode: input.mode as 'exact' | 'semantic' | undefined,
+        });
+        return searchNotesResult.success
+          ? JSON.stringify(searchNotesResult.data, null, 2)
+          : `Error: ${searchNotesResult.error}`;
 
       default:
         return `Unknown tool: ${name}`;

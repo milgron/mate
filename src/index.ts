@@ -26,6 +26,8 @@ const config = {
   allowedUsers: process.env.TELEGRAM_ALLOWED_USERS ?? '',
   groqApiKey: process.env.GROQ_API_KEY,
   botName: process.env.BOT_NAME ?? personality.name,
+  collectedNotesApiKey: process.env.COLLECTED_NOTES_API_KEY,
+  collectedNotesSitePath: process.env.COLLECTED_NOTES_SITE_PATH,
 };
 
 // Validate required environment variables
@@ -55,8 +57,13 @@ async function main() {
   const agent = createAgent({
     apiKey: config.anthropicApiKey!,
     voiceEnabled: !!config.groqApiKey,
+    collectedNotesApiKey: config.collectedNotesApiKey,
+    collectedNotesSitePath: config.collectedNotesSitePath,
   });
   logger.info('Claude agent initialized (Haiku default, Opus for "think hard")');
+  if (config.collectedNotesApiKey && config.collectedNotesSitePath) {
+    logger.info('Collected Notes integration enabled');
+  }
 
   // Create Telegram bot
   const bot = createBot(config.telegramToken!);
