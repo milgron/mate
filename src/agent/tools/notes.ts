@@ -12,9 +12,9 @@ export interface NotesToolResult {
 export class NotesTool {
   private client: CollectedNotesClient | null = null;
 
-  constructor(apiKey?: string, sitePath?: string) {
-    if (apiKey && sitePath) {
-      this.client = new CollectedNotesClient(apiKey, sitePath);
+  constructor(email?: string, apiKey?: string, sitePath?: string) {
+    if (email && apiKey && sitePath) {
+      this.client = new CollectedNotesClient(email, apiKey, sitePath);
     }
   }
 

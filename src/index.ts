@@ -26,6 +26,7 @@ const config = {
   allowedUsers: process.env.TELEGRAM_ALLOWED_USERS ?? '',
   groqApiKey: process.env.GROQ_API_KEY,
   botName: process.env.BOT_NAME ?? personality.name,
+  collectedNotesEmail: process.env.COLLECTED_NOTES_EMAIL,
   collectedNotesApiKey: process.env.COLLECTED_NOTES_API_KEY,
   collectedNotesSitePath: process.env.COLLECTED_NOTES_SITE_PATH,
 };
@@ -57,11 +58,12 @@ async function main() {
   const agent = createAgent({
     apiKey: config.anthropicApiKey!,
     voiceEnabled: !!config.groqApiKey,
+    collectedNotesEmail: config.collectedNotesEmail,
     collectedNotesApiKey: config.collectedNotesApiKey,
     collectedNotesSitePath: config.collectedNotesSitePath,
   });
   logger.info('Claude agent initialized (Haiku default, Opus for "think hard")');
-  if (config.collectedNotesApiKey && config.collectedNotesSitePath) {
+  if (config.collectedNotesEmail && config.collectedNotesApiKey && config.collectedNotesSitePath) {
     logger.info('Collected Notes integration enabled');
   }
 

@@ -40,10 +40,12 @@ export interface CollectedNotesResult<T> {
  * https://collectednotes.com/blog/api
  */
 export class CollectedNotesClient {
+  private email: string;
   private token: string;
   private sitePath: string;
 
-  constructor(token: string, sitePath: string) {
+  constructor(email: string, token: string, sitePath: string) {
+    this.email = email;
     this.token = token;
     this.sitePath = sitePath;
   }
@@ -57,7 +59,7 @@ export class CollectedNotesClient {
       const response = await fetch(`${BASE_URL}${path}`, {
         method,
         headers: {
-          Authorization: `Bearer ${this.token}`,
+          Authorization: `${this.email} ${this.token}`,
           Accept: 'application/json',
           'Content-Type': 'application/json',
         },
@@ -85,7 +87,7 @@ export class CollectedNotesClient {
       const response = await fetch(`${BASE_URL}${path}`, {
         method: 'GET',
         headers: {
-          Authorization: `Bearer ${this.token}`,
+          Authorization: `${this.email} ${this.token}`,
           Accept: 'text/plain',
         },
       });
