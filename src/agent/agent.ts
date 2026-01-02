@@ -16,7 +16,6 @@ export interface AgentConfig {
   systemPrompt?: string;
   maxTokens?: number;
   voiceEnabled?: boolean;
-  collectedNotesEmail?: string;
   collectedNotesApiKey?: string;
   collectedNotesSitePath?: string;
 }
@@ -118,7 +117,7 @@ export function createAgent(config: AgentConfig): Agent {
     apiKey: config.apiKey,
   });
 
-  const hasNotesConfig = !!(config.collectedNotesEmail && config.collectedNotesApiKey && config.collectedNotesSitePath);
+  const hasNotesConfig = !!(config.collectedNotesApiKey && config.collectedNotesSitePath);
   const systemPrompt = config.systemPrompt ?? buildSystemPrompt(config.voiceEnabled ?? false, hasNotesConfig);
 
   const memory = new ConversationMemory({ maxMessages: 50 });
@@ -144,7 +143,6 @@ export function createAgent(config: AgentConfig): Agent {
   const speakTool = config.voiceEnabled ? new SpeakTool() : null;
 
   const notesTool = new NotesTool(
-    config.collectedNotesEmail,
     config.collectedNotesApiKey,
     config.collectedNotesSitePath
   );

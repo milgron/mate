@@ -1,4 +1,4 @@
-const BASE_URL = 'https://api.collectednotes.com';
+const BASE_URL = 'https://collectednotes.com';
 
 export interface Note {
   id: number;
@@ -40,12 +40,10 @@ export interface CollectedNotesResult<T> {
  * https://collectednotes.com/blog/api
  */
 export class CollectedNotesClient {
-  private email: string;
   private token: string;
   private sitePath: string;
 
-  constructor(email: string, token: string, sitePath: string) {
-    this.email = email;
+  constructor(token: string, sitePath: string) {
     this.token = token;
     this.sitePath = sitePath;
   }
@@ -59,7 +57,7 @@ export class CollectedNotesClient {
       const response = await fetch(`${BASE_URL}${path}`, {
         method,
         headers: {
-          Authorization: `${this.email} ${this.token}`,
+          Authorization: `Bearer ${this.token}`,
           Accept: 'application/json',
           'Content-Type': 'application/json',
         },
@@ -87,7 +85,7 @@ export class CollectedNotesClient {
       const response = await fetch(`${BASE_URL}${path}`, {
         method: 'GET',
         headers: {
-          Authorization: `${this.email} ${this.token}`,
+          Authorization: `Bearer ${this.token}`,
           Accept: 'text/plain',
         },
       });
@@ -137,8 +135,7 @@ export class CollectedNotesClient {
     visibility: 'public' | 'private' | 'public_unlisted' = 'private'
   ): Promise<CollectedNotesResult<Note>> {
     return this.request<Note>('POST', `/sites/${this.sitePath}/notes`, {
-      body,
-      visibility,
+      note: { body, visibility },
     });
   }
 
@@ -150,14 +147,14 @@ export class CollectedNotesClient {
     body: string,
     visibility?: 'public' | 'private' | 'public_unlisted'
   ): Promise<CollectedNotesResult<Note>> {
-    const payload: { body: string; visibility?: string } = { body };
+    const notePayload: { body: string; visibility?: string } = { body };
     if (visibility) {
-      payload.visibility = visibility;
+      notePayload.visibility = visibility;
     }
     return this.request<Note>(
       'PUT',
       `/sites/${this.sitePath}/notes/${notePath}`,
-      payload
+      { note: notePayload }
     );
   }
 
