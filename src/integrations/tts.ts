@@ -36,7 +36,7 @@ export class GroqTTS {
    * Returns the path to the audio file.
    */
   async synthesize(text: string): Promise<TTSResult> {
-    const tempPath = path.join('/tmp', `tts_${Date.now()}.mp3`);
+    const tempPath = path.join('/tmp', `tts_${Date.now()}.wav`);
 
     try {
       // Truncate very long text to avoid API limits
@@ -49,7 +49,7 @@ export class GroqTTS {
         model: 'canopylabs/orpheus-v1-english',
         voice: this.voice,
         input: truncatedText,
-        response_format: 'mp3',
+        response_format: 'wav',
       });
 
       // Get the audio data as a buffer
