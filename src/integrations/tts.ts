@@ -8,19 +8,16 @@ export interface TTSResult {
   error?: string;
 }
 
-// Available voices for Groq Orpheus TTS (canopylabs/orpheus-v1-english)
-// Voices ordered by conversational realism
+// Available voices for Groq Orpheus TTS
 export type GroqVoice =
-  | 'tara'
-  | 'leah'
-  | 'jess'
-  | 'leo'
-  | 'dan'
-  | 'mia'
-  | 'zac'
-  | 'zoe';
+  | 'autumn'
+  | 'diana'
+  | 'hannah'
+  | 'austin'
+  | 'daniel'
+  | 'troy';
 
-const DEFAULT_VOICE: GroqVoice = 'tara';
+const DEFAULT_VOICE: GroqVoice = 'diana';
 
 /**
  * Text-to-speech using Groq's Orpheus TTS API.
