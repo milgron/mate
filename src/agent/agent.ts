@@ -76,7 +76,11 @@ function buildSystemPrompt(voiceEnabled: boolean = false, hasNotes: boolean = fa
     : '';
 
   const notesInstructions = hasNotes
-    ? `\nIMPORTANT: When users ask you to write a blog post, create content, or publish something, you MUST use the create_note tool to actually publish it to Collected Notes. Do NOT just describe what you would write - actually write the full content and publish it using create_note. The body should be markdown with a # heading as the title.`
+    ? `\nIMPORTANT: When users ask you to write a blog post:
+1. First, write the full blog post content in markdown format with a # heading as the title
+2. Save it locally using write_file to /app/data/posts/<slug>.md (create the folder if needed)
+3. Then publish it to Collected Notes using create_note with the same content
+Do NOT just describe what you would write - actually write and publish the full content.`
     : '';
 
   const capabilitiesSection = `
