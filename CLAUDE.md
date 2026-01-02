@@ -1,5 +1,13 @@
 # Jarvis - Self-Improving Claude Agent
 
+## Pi Connection
+
+```
+Host: alfajor.local
+User: ale
+SSH:  ssh ale@alfajor.local
+```
+
 ## Architecture
 
 ```

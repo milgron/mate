@@ -320,8 +320,8 @@ export function createAgent(config: AgentConfig): Agent {
     // Add user message to memory (store original message)
     memory.addMessage(userId, { role: 'user', content: cleanMessage || message });
 
-    // Build messages for API
-    const messages = memory.getMessages(userId).map((m) => ({
+    // Build messages for API (using Anthropic's message types)
+    const messages: Anthropic.MessageParam[] = memory.getMessages(userId).map((m) => ({
       role: m.role as 'user' | 'assistant',
       content: m.content,
     }));
@@ -350,20 +350,21 @@ export function createAgent(config: AgentConfig): Agent {
         }))
       );
 
-      // Continue conversation with tool results
+      // Add assistant response and tool results to messages
       messages.push({
         role: 'assistant',
-        content: response.content as unknown as string,
+        content: response.content,
+      });
+      messages.push({
+        role: 'user',
+        content: toolResults,
       });
 
       response = await client.messages.create({
         model,
         max_tokens: config.maxTokens ?? (useThinking ? 4096 : 1024),
         system: systemPrompt,
-        messages: [
-          ...messages,
-          { role: 'user', content: toolResults as unknown as string },
-        ],
+        messages,
         tools,
       });
     }
