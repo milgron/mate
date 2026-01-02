@@ -72,7 +72,11 @@ function buildSystemPrompt(voiceEnabled: boolean = false, hasNotes: boolean = fa
     : '';
 
   const notesCapability = hasNotes
-    ? `\n- Manage blog notes on Collected Notes (list_notes, get_note, create_note, update_note, delete_note, search_notes)`
+    ? `\n- Publish and manage blog posts on Collected Notes (list_notes, get_note, create_note, update_note, delete_note, search_notes)`
+    : '';
+
+  const notesInstructions = hasNotes
+    ? `\nWhen users ask you to write a blog post, create content, or publish something, use the create_note tool to publish it directly to Collected Notes. Write the content in markdown format with a # heading as the title. When asked about existing posts, use list_notes or search_notes to find them.`
     : '';
 
   const capabilitiesSection = `
@@ -94,7 +98,7 @@ You can:
 - Check application logs (logs)
 - Trigger self-updates (self_update)${voiceCapability}${notesCapability}
 
-${voiceEnabled ? 'When users request voice/audio responses (e.g., "send me an audio", "reply with voice", "talk to me", "speak to me", "con voz", "mandame audio"), use the "speak" tool with the text you want to say. The text will be converted to speech and sent as an audio message.' : ''}
+${voiceEnabled ? 'When users request voice/audio responses (e.g., "send me an audio", "reply with voice", "talk to me", "speak to me", "con voz", "mandame audio"), use the "speak" tool with the text you want to say. The text will be converted to speech and sent as an audio message.' : ''}${notesInstructions}
 
 Proactively remember important things the user tells you.`;
 
