@@ -29,21 +29,21 @@ RUN apt-get update && \
 RUN npm install -g @anthropic-ai/claude-code && \
     npm install -g claude-flow@alpha || npm install -g claude-flow@latest || true
 
-# Clean up build dependencies to reduce image size
-RUN apt-get update && \
-    apt-get remove -y build-essential && \
-    apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 # Create non-root user
 RUN groupadd -g 1001 mate && \
     useradd -u 1001 -g mate -m mate
 
-# Copy only production dependencies
+# Copy and install production dependencies (needs build-essential for better-sqlite3)
 COPY package*.json ./
 RUN npm ci --only=production && npm cache clean --force
+
+# Clean up build dependencies to reduce image size (AFTER npm ci)
+RUN apt-get update && \
+    apt-get remove -y build-essential && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy built application and config
 COPY --from=builder /app/dist ./dist

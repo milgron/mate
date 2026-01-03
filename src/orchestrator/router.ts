@@ -51,13 +51,14 @@ export function suggestMode(message: string): RoutingMode {
  */
 export async function routeMessage(
   message: string,
-  mode: RoutingMode
+  mode: RoutingMode,
+  userId: string
 ): Promise<string> {
-  logger.info('Routing message', { mode, messageLength: message.length });
+  logger.info('Routing message', { mode, messageLength: message.length, userId });
 
   if (mode === 'flow') {
-    return execComplex(message);
+    return execComplex(message, userId);
   }
 
-  return execSimple(message);
+  return execSimple(message, userId);
 }

@@ -19,12 +19,14 @@
     "claude:auth": "claude auth login"
   },
   "dependencies": {
+    "better-sqlite3": "^12.5.0",
     "grammy": "^1.21.0",
     "groq-sdk": "^0.37.0",
     "winston": "^3.11.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.0.0",
     "msw": "^2.1.0",
     "tsx": "^4.7.0",

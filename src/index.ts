@@ -147,7 +147,7 @@ async function main() {
     logger.info('Processing message', { userId, length: message.length, mode });
 
     try {
-      const response = await routeMessage(message, mode);
+      const response = await routeMessage(message, mode, userId);
       logger.info('Message processed', {
         userId,
         responseLength: response.length,
