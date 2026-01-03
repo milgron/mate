@@ -34,7 +34,7 @@ export async function execSimple(
 
   try {
     const { stdout, stderr } = await execAsync(
-      `claude -p "${escaped}" --output-format text`,
+      `claude -p "${escaped}" --output-format text < /dev/null`,
       {
         timeout: opts.timeout,
         maxBuffer: opts.maxBuffer,
