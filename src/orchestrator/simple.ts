@@ -38,7 +38,8 @@ export async function execSimple(
       {
         timeout: opts.timeout,
         maxBuffer: opts.maxBuffer,
-        env: { ...process.env },
+        env: { ...process.env, HOME: '/home/mate' },
+        shell: '/bin/bash',
       }
     );
 
@@ -49,9 +50,14 @@ export async function execSimple(
     const result = stdout.trim();
     logger.info('Simple prompt completed', { responseLength: result.length });
     return result;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error('Claude CLI execution failed', { error: errorMessage });
-    throw new Error(`Claude CLI failed: ${errorMessage}`);
+  } catch (error: unknown) {
+    const err = error as { message?: string; stderr?: string; stdout?: string; code?: number };
+    logger.error('Claude CLI execution failed', {
+      error: err.message,
+      stderr: err.stderr,
+      stdout: err.stdout,
+      code: err.code,
+    });
+    throw new Error(`Claude CLI failed: ${err.message || String(error)}${err.stderr ? ` - ${err.stderr}` : ''}`);
   }
 }
