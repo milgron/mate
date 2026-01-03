@@ -18,7 +18,7 @@ services:
 
     # Temp filesystem for runtime needs
     tmpfs:
-      - /tmp:size=64m,noexec,nosuid,nodev
+      - /tmp:size=512m,noexec,nosuid,nodev
 
     # Volumes
     volumes:
@@ -33,14 +33,14 @@ services:
     environment:
       - NODE_ENV=production
 
-    # Resource limits (suitable for Pi Zero 2 W)
+    # Resource limits (optimized for Pi 5 8GB)
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 300M
+          cpus: '3'
+          memory: 4G
         reservations:
-          memory: 150M
+          memory: 512M
 
     # Logging
     logging:
