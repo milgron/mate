@@ -9,8 +9,6 @@ import {
   createMessageHandler,
   createMessageHandlerWithTTS,
   createVoiceHandlerWithTTS,
-  createModeCallbackHandler,
-  createModeCallbackHandlerWithTTS,
 } from './telegram/handlers.js';
 import { UserWhitelist } from './security/whitelist.js';
 import { GroqTranscriber } from './integrations/transcription.js';
@@ -18,7 +16,7 @@ import { GroqTTS } from './integrations/tts.js';
 import { logger } from './utils/logger.js';
 import { loadPersonality } from './agent/personality.js';
 import { routeMessage, type RoutingMode } from './orchestrator/index.js';
-import { clearUserMode } from './telegram/mode-selector.js';
+import { setUserMode, getUserMode } from './telegram/mode-selector.js';
 
 // Track bot start time for uptime calculation
 const botStartTime = Date.now();
@@ -72,23 +70,29 @@ async function main() {
 
     await ctx.reply(
       `Hello! I am ${config.botName}, your AI assistant.\n\n` +
-        'Send me a message and choose a mode:\n' +
-        '⚡ Simple - Fast responses via Claude CLI\n' +
-        '🔄 Flow - Complex tasks via claude-flow\n\n' +
-        voiceFeatures +
+        `${voiceFeatures}` +
         'Commands:\n' +
-        '/start - Show this message\n' +
-        '/clear - Clear mode selection\n' +
+        '/flow - Switch to complex mode (multi-step tasks)\n' +
+        '/simple - Switch to simple mode (default)\n' +
         '/status - Show bot and system status'
     );
   });
 
-  // Handle /clear command
-  bot.command('clear', async (ctx) => {
+  // Handle /flow command - switch to flow mode
+  bot.command('flow', async (ctx) => {
     const userId = ctx.from?.id;
     if (userId) {
-      clearUserMode(String(userId));
-      await ctx.reply('Mode selection cleared. Send a new message to start.');
+      setUserMode(String(userId), 'flow');
+      await ctx.reply('🔄 Flow mode activated. Complex multi-step tasks enabled.\n\nUse /simple to switch back.');
+    }
+  });
+
+  // Handle /simple command - switch to simple mode
+  bot.command('simple', async (ctx) => {
+    const userId = ctx.from?.id;
+    if (userId) {
+      setUserMode(String(userId), 'simple');
+      await ctx.reply('⚡ Simple mode activated (default). Fast responses via Claude CLI.');
     }
   });
 
@@ -96,6 +100,10 @@ async function main() {
   bot.command('status', async (ctx) => {
     const userId = ctx.from?.id;
     if (!userId) return;
+
+    const userIdStr = String(userId);
+    const currentMode = getUserMode(userIdStr);
+    const modeEmoji = currentMode === 'flow' ? '🔄' : '⚡';
 
     const uptime = os.uptime();
     const freeMem = os.freemem();
@@ -114,9 +122,7 @@ async function main() {
     const status = [
       `📊 ${config.botName} Status`,
       '',
-      '▸ Architecture',
-      '  ⚡ Simple: Claude CLI',
-      '  🔄 Flow: claude-flow swarm',
+      `▸ Current mode: ${modeEmoji} ${currentMode}`,
       '',
       '▸ System',
       `  Pi uptime: ${formatTime(uptime)}`,
@@ -127,7 +133,6 @@ async function main() {
       '▸ Features',
       `  Voice input: ${config.groqApiKey ? '✓' : '✗'}`,
       `  Voice output: ${config.groqApiKey ? '✓' : '✗'}`,
-      `  Users: ${whitelist.size}`,
     ].join('\n');
 
     await ctx.reply(status);
@@ -182,24 +187,11 @@ async function main() {
         GroqTTS.cleanup
       )
     );
-
-    // Callback queries for mode selection
-    bot.on(
-      'callback_query:data',
-      createModeCallbackHandlerWithTTS(
-        processUserMessage,
-        (text) => tts.synthesize(text),
-        GroqTTS.cleanup
-      )
-    );
   } else {
     logger.info('Voice support disabled (GROQ_API_KEY not set)');
 
     // Text messages without TTS
     bot.on('message:text', createMessageHandler(processUserMessage));
-
-    // Callback queries for mode selection
-    bot.on('callback_query:data', createModeCallbackHandler(processUserMessage));
   }
 
   // Handle errors
@@ -212,7 +204,7 @@ async function main() {
   logger.info(`${config.botName} is running!`);
 
   // Notify all whitelisted users that bot is ready
-  const startupMessage = `🤖 ${config.botName} is back online and ready!\n\n⚡ Simple | 🔄 Flow`;
+  const startupMessage = `🤖 ${config.botName} is online!\n\n⚡ Simple mode (default)\n\nUse /flow for complex tasks`;
   for (const userId of whitelist.getAllUserIds()) {
     try {
       await bot.api.sendMessage(userId, startupMessage);
