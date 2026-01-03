@@ -43,11 +43,13 @@ export async function execComplex(
 
   try {
     const { stdout, stderr } = await execAsync(
-      `claude-flow swarm "${escaped}" --claude --output-format json`,
+      `claude-flow swarm "${escaped}" --claude --output-format json < /dev/null`,
       {
         timeout: opts.timeout,
         maxBuffer: opts.maxBuffer,
-        env: { ...process.env },
+        env: { ...process.env, HOME: '/home/mate' },
+        shell: '/bin/bash',
+        cwd: '/app/data',
       }
     );
 

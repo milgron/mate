@@ -60,11 +60,10 @@ export class GroqTranscriber {
       // Download the file
       await downloadFile(fileUrl, tempPath);
 
-      // Transcribe with Groq
+      // Transcribe with Groq (auto-detect language)
       const transcription = await this.client.audio.transcriptions.create({
         file: fs.createReadStream(tempPath),
         model: 'whisper-large-v3',
-        language: 'en', // Can be made configurable
       });
 
       return {

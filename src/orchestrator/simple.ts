@@ -34,12 +34,13 @@ export async function execSimple(
 
   try {
     const { stdout, stderr } = await execAsync(
-      `claude -p "${escaped}" --output-format text < /dev/null`,
+      `claude -p "${escaped}" --allowedTools "WebSearch,Read,Write(/app/data/**)" --output-format text < /dev/null`,
       {
         timeout: opts.timeout,
         maxBuffer: opts.maxBuffer,
         env: { ...process.env, HOME: '/home/mate' },
         shell: '/bin/bash',
+        cwd: '/app/data',
       }
     );
 
