@@ -18,14 +18,22 @@ RUN npm run build
 # Production stage
 FROM node:20-bookworm-slim AS production
 
-# Install tini and other dependencies
+# Install tini, build tools, and other dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends tini curl git && \
+    apt-get install -y --no-install-recommends \
+    tini curl git \
+    build-essential python3 && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Claude CLI and claude-flow globally
 RUN npm install -g @anthropic-ai/claude-code && \
     npm install -g claude-flow@alpha || npm install -g claude-flow@latest || true
+
+# Clean up build dependencies to reduce image size
+RUN apt-get update && \
+    apt-get remove -y build-essential && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -49,7 +57,7 @@ USER mate
 
 # Environment
 ENV NODE_ENV=production
-ENV NODE_OPTIONS="--max-old-space-size=256"
+ENV NODE_OPTIONS="--max-old-space-size=1024"
 ENV HOME=/home/mate
 
 # Health check
