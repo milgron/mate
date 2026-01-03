@@ -95,7 +95,7 @@ export async function execSimple(
 
   try {
     const { stdout, stderr } = await execAsync(
-      `claude -p "${escaped}" --allowedTools "WebSearch,Read,Write(/app/data/**)" --output-format text < /dev/null`,
+      `claude -p "${escaped}" --allowedTools "WebSearch,Read,Write(/app/data/**)" --yes --output-format text < /dev/null`,
       {
         timeout: opts.timeout,
         maxBuffer: opts.maxBuffer,
