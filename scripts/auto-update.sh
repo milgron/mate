@@ -5,17 +5,17 @@
 # Usage: ./auto-update.sh [--daemon]
 #   --daemon: Run continuously, checking every POLL_INTERVAL seconds
 #
-# Install as systemd service for automatic startup (see scripts/jarvis-updater.service)
+# Install as systemd service for automatic startup (see scripts/mate-updater.service)
 
 set -e
 
 # Configuration
-REPO_DIR="${REPO_DIR:-$HOME/jarvis}"
+REPO_DIR="${REPO_DIR:-$HOME/mate}"
 DOCKER_DIR="${DOCKER_DIR:-$REPO_DIR/docker}"
 POLL_INTERVAL="${POLL_INTERVAL:-60}"  # seconds
 BRANCH="${BRANCH:-main}"
-LOG_FILE="${LOG_FILE:-/tmp/jarvis-updater.log}"
-TRIGGER_FILE="${TRIGGER_FILE:-/var/jarvis/update-trigger}"
+LOG_FILE="${LOG_FILE:-/tmp/mate-updater.log}"
+TRIGGER_FILE="${TRIGGER_FILE:-/var/mate/update-trigger}"
 LAST_TRIGGER=""
 
 # Colors for output
@@ -145,7 +145,7 @@ case "${1:-}" in
         echo "  --help, -h    Show this help message"
         echo ""
         echo "Environment variables:"
-        echo "  REPO_DIR       Path to repo (default: ~/jarvis)"
+        echo "  REPO_DIR       Path to repo (default: ~/mate)"
         echo "  POLL_INTERVAL  Seconds between checks (default: 60)"
         echo "  BRANCH         Git branch to track (default: main)"
         ;;

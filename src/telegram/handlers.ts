@@ -1,42 +1,47 @@
 import { Context, InputFile } from 'grammy';
-import type { AgentResponse } from '../agent/agent.js';
+import type { RoutingMode } from '../orchestrator/index.js';
+import {
+  getModeKeyboard,
+  getUserModeState,
+  setUserMode,
+  setPendingMessage,
+  consumePendingMessage,
+  markMessageConsumed,
+} from './mode-selector.js';
+import { suggestMode } from '../orchestrator/index.js';
 
-export type MessageProcessor = (userId: string, message: string) => Promise<AgentResponse>;
-export type VoiceTranscriber = (fileUrl: string) => Promise<{ success: boolean; text?: string; error?: string }>;
-export type TextToSpeech = (text: string) => Promise<{ success: boolean; audioPath?: string; error?: string }>;
+export type MessageProcessor = (
+  userId: string,
+  message: string,
+  mode: RoutingMode
+) => Promise<{ text: string; speakText?: string }>;
+export type VoiceTranscriber = (
+  fileUrl: string
+) => Promise<{ success: boolean; text?: string; error?: string }>;
+export type TextToSpeech = (
+  text: string
+) => Promise<{ success: boolean; audioPath?: string; error?: string }>;
 
 /**
  * Strips markdown formatting from text for plain Telegram display.
- * Removes: **bold**, *italic*, `code`, ```code blocks```, [links](url), headers
  */
 function stripMarkdown(text: string): string {
   return text
-    // Remove code blocks first (```...```)
     .replace(/```[\s\S]*?```/g, (match) => match.slice(3, -3).trim())
-    // Remove inline code (`...`)
     .replace(/`([^`]+)`/g, '$1')
-    // Remove bold (**...**)
     .replace(/\*\*([^*]+)\*\*/g, '$1')
-    // Remove bold (__)
     .replace(/__([^_]+)__/g, '$1')
-    // Remove italic (*...*)
     .replace(/\*([^*]+)\*/g, '$1')
-    // Remove italic (_..._)
     .replace(/_([^_]+)_/g, '$1')
-    // Remove strikethrough (~~...~~)
     .replace(/~~([^~]+)~~/g, '$1')
-    // Remove markdown links [text](url) -> text
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    // Remove markdown headers (# Header)
     .replace(/^#{1,6}\s+/gm, '')
-    // Clean up any double spaces
     .replace(/  +/g, ' ')
     .trim();
 }
 
 /**
- * Handles incoming text messages.
- * Passes the message to the processor and replies with the result.
+ * Handles incoming text messages with mode selection via buttons.
  */
 export async function handleMessage(
   ctx: Context,
@@ -46,16 +51,97 @@ export async function handleMessage(
   const text = ctx.message?.text;
 
   if (!userId || !text || text.trim() === '') {
-    // Ignore empty messages
     return;
   }
 
-  try {
-    const response = await processMessage(String(userId), text);
-    await ctx.reply(stripMarkdown(response.text));
-  } catch (error) {
-    console.error('Error processing message:', error);
-    await ctx.reply('Sorry, an error occurred while processing your message.');
+  const userIdStr = String(userId);
+  const modeState = getUserModeState(userIdStr);
+
+  // If user has selected a mode and we're awaiting their message
+  if (modeState?.awaitingMessage) {
+    // Process with selected mode
+    try {
+      const response = await processMessage(userIdStr, text, modeState.mode);
+      await ctx.reply(stripMarkdown(response.text));
+    } catch (error) {
+      console.error('Error processing message:', error);
+      await ctx.reply('Sorry, an error occurred while processing your message.');
+    } finally {
+      // Clear mode after processing
+      markMessageConsumed(userIdStr);
+    }
+    return;
+  }
+
+  // No mode selected - store message and show mode selection
+  setPendingMessage(userIdStr, text);
+  const suggested = suggestMode(text);
+  const suggestionHint =
+    suggested === 'flow'
+      ? ' (I suggest 🔄 Flow for this task)'
+      : ' (I suggest ⚡ Simple for this)';
+
+  await ctx.reply(`Choose a mode${suggestionHint}:`, {
+    reply_markup: getModeKeyboard(),
+  });
+}
+
+/**
+ * Handles mode selection callback from inline keyboard.
+ */
+export async function handleModeCallback(
+  ctx: Context,
+  processMessage: MessageProcessor
+): Promise<void> {
+  const callbackData = ctx.callbackQuery?.data;
+  const userId = ctx.from?.id;
+
+  if (!userId || !callbackData?.startsWith('mode:')) {
+    return;
+  }
+
+  const userIdStr = String(userId);
+  const mode = callbackData.replace('mode:', '') as RoutingMode;
+
+  // Acknowledge the button press
+  await ctx.answerCallbackQuery();
+
+  // Check if there's a pending message to process
+  const pendingMessage = consumePendingMessage(userIdStr);
+
+  if (pendingMessage) {
+    // Delete the mode selection message
+    try {
+      await ctx.deleteMessage();
+    } catch {
+      // Ignore if we can't delete
+    }
+
+    // Process the pending message with selected mode
+    const modeEmoji = mode === 'flow' ? '🔄' : '⚡';
+    await ctx.reply(`${modeEmoji} Processing with ${mode} mode...`);
+
+    try {
+      const response = await processMessage(userIdStr, pendingMessage, mode);
+      await ctx.reply(stripMarkdown(response.text));
+    } catch (error) {
+      console.error('Error processing message:', error);
+      await ctx.reply('Sorry, an error occurred while processing your message.');
+    }
+  } else {
+    // No pending message - set mode and wait for message
+    setUserMode(userIdStr, mode);
+
+    // Update the message to show mode selected
+    try {
+      await ctx.editMessageText(
+        `Mode: ${mode === 'flow' ? '🔄 Flow' : '⚡ Simple'}\n\nNow send me your message or audio.`
+      );
+    } catch {
+      await ctx.reply(
+        `Mode: ${mode === 'flow' ? '🔄 Flow' : '⚡ Simple'}\n\nNow send me your message or audio.`
+      );
+    }
   }
 }
 
@@ -69,8 +155,16 @@ export function createMessageHandler(processMessage: MessageProcessor) {
 }
 
 /**
+ * Creates a callback query handler for mode selection.
+ */
+export function createModeCallbackHandler(processMessage: MessageProcessor) {
+  return async (ctx: Context): Promise<void> => {
+    await handleModeCallback(ctx, processMessage);
+  };
+}
+
+/**
  * Handles incoming text messages with optional TTS support.
- * If the agent uses the speak tool, sends audio response.
  */
 export async function handleMessageWithTTS(
   ctx: Context,
@@ -85,34 +179,53 @@ export async function handleMessageWithTTS(
     return;
   }
 
-  try {
-    const response = await processMessage(String(userId), text);
+  const userIdStr = String(userId);
+  const modeState = getUserModeState(userIdStr);
 
-    // Check if the agent used the speak tool
-    if (response.speakText) {
-      await ctx.reply('🔊 Generating audio...');
+  // If user has selected a mode and we're awaiting their message
+  if (modeState?.awaitingMessage) {
+    try {
+      const response = await processMessage(userIdStr, text, modeState.mode);
 
-      const result = await synthesize(response.speakText);
+      if (response.speakText) {
+        await ctx.reply('🔊 Generating audio...');
+        const result = await synthesize(response.speakText);
 
-      if (result.success && result.audioPath) {
-        try {
-          await ctx.replyWithVoice(new InputFile(result.audioPath));
-        } finally {
-          cleanup(result.audioPath);
+        if (result.success && result.audioPath) {
+          try {
+            await ctx.replyWithVoice(new InputFile(result.audioPath));
+          } finally {
+            cleanup(result.audioPath);
+          }
+        } else {
+          await ctx.reply(
+            `Audio generation failed: ${result.error || 'Unknown error'}`
+          );
+          await ctx.reply(stripMarkdown(response.speakText));
         }
       } else {
-        // Fallback to text if TTS fails
-        await ctx.reply(`❌ Audio generation failed: ${result.error || 'Unknown error'}`);
-        await ctx.reply(stripMarkdown(response.speakText));
+        await ctx.reply(stripMarkdown(response.text));
       }
-    } else {
-      // Normal text response
-      await ctx.reply(stripMarkdown(response.text));
+    } catch (error) {
+      console.error('Error processing message:', error);
+      await ctx.reply('Sorry, an error occurred while processing your message.');
+    } finally {
+      markMessageConsumed(userIdStr);
     }
-  } catch (error) {
-    console.error('Error processing message:', error);
-    await ctx.reply('Sorry, an error occurred while processing your message.');
+    return;
   }
+
+  // No mode selected - store message and show mode selection
+  setPendingMessage(userIdStr, text);
+  const suggested = suggestMode(text);
+  const suggestionHint =
+    suggested === 'flow'
+      ? ' (I suggest 🔄 Flow for this task)'
+      : ' (I suggest ⚡ Simple for this)';
+
+  await ctx.reply(`Choose a mode${suggestionHint}:`, {
+    reply_markup: getModeKeyboard(),
+  });
 }
 
 /**
@@ -129,8 +242,93 @@ export function createMessageHandlerWithTTS(
 }
 
 /**
+ * Handles mode callback with TTS support.
+ */
+export async function handleModeCallbackWithTTS(
+  ctx: Context,
+  processMessage: MessageProcessor,
+  synthesize: TextToSpeech,
+  cleanup: (path: string) => void
+): Promise<void> {
+  const callbackData = ctx.callbackQuery?.data;
+  const userId = ctx.from?.id;
+
+  if (!userId || !callbackData?.startsWith('mode:')) {
+    return;
+  }
+
+  const userIdStr = String(userId);
+  const mode = callbackData.replace('mode:', '') as RoutingMode;
+
+  await ctx.answerCallbackQuery();
+
+  const pendingMessage = consumePendingMessage(userIdStr);
+
+  if (pendingMessage) {
+    try {
+      await ctx.deleteMessage();
+    } catch {
+      // Ignore
+    }
+
+    const modeEmoji = mode === 'flow' ? '🔄' : '⚡';
+    await ctx.reply(`${modeEmoji} Processing with ${mode} mode...`);
+
+    try {
+      const response = await processMessage(userIdStr, pendingMessage, mode);
+
+      if (response.speakText) {
+        await ctx.reply('🔊 Generating audio...');
+        const result = await synthesize(response.speakText);
+
+        if (result.success && result.audioPath) {
+          try {
+            await ctx.replyWithVoice(new InputFile(result.audioPath));
+          } finally {
+            cleanup(result.audioPath);
+          }
+        } else {
+          await ctx.reply(
+            `Audio generation failed: ${result.error || 'Unknown error'}`
+          );
+          await ctx.reply(stripMarkdown(response.speakText));
+        }
+      } else {
+        await ctx.reply(stripMarkdown(response.text));
+      }
+    } catch (error) {
+      console.error('Error processing message:', error);
+      await ctx.reply('Sorry, an error occurred while processing your message.');
+    }
+  } else {
+    setUserMode(userIdStr, mode);
+    try {
+      await ctx.editMessageText(
+        `Mode: ${mode === 'flow' ? '🔄 Flow' : '⚡ Simple'}\n\nNow send me your message or audio.`
+      );
+    } catch {
+      await ctx.reply(
+        `Mode: ${mode === 'flow' ? '🔄 Flow' : '⚡ Simple'}\n\nNow send me your message or audio.`
+      );
+    }
+  }
+}
+
+/**
+ * Creates a callback handler with TTS support.
+ */
+export function createModeCallbackHandlerWithTTS(
+  processMessage: MessageProcessor,
+  synthesize: TextToSpeech,
+  cleanup: (path: string) => void
+) {
+  return async (ctx: Context): Promise<void> => {
+    await handleModeCallbackWithTTS(ctx, processMessage, synthesize, cleanup);
+  };
+}
+
+/**
  * Handles incoming voice messages.
- * Transcribes the audio and passes to the message processor.
  */
 export async function handleVoiceMessage(
   ctx: Context,
@@ -144,31 +342,48 @@ export async function handleVoiceMessage(
     return;
   }
 
+  const userIdStr = String(userId);
+  const modeState = getUserModeState(userIdStr);
+
   try {
-    // Notify user we're processing
     await ctx.reply('🎤 Transcribing...');
 
-    // Get file URL from Telegram
     const file = await ctx.api.getFile(voice.file_id);
     const fileUrl = `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`;
 
-    // Transcribe
     const result = await transcribe(fileUrl);
 
     if (!result.success || !result.text) {
-      await ctx.reply(`❌ Transcription failed: ${result.error || 'Unknown error'}`);
+      await ctx.reply(
+        `Transcription failed: ${result.error || 'Unknown error'}`
+      );
       return;
     }
 
-    // Show what was transcribed
     await ctx.reply(`📝 "${result.text}"`);
 
-    // Process with Claude
-    const response = await processMessage(String(userId), result.text);
-    await ctx.reply(stripMarkdown(response.text));
+    // If user has mode selected, process immediately
+    if (modeState?.awaitingMessage) {
+      const response = await processMessage(userIdStr, result.text, modeState.mode);
+      await ctx.reply(stripMarkdown(response.text));
+      markMessageConsumed(userIdStr);
+    } else {
+      // Store transcribed text and ask for mode
+      setPendingMessage(userIdStr, result.text);
+      const suggested = suggestMode(result.text);
+      const suggestionHint =
+        suggested === 'flow'
+          ? ' (I suggest 🔄 Flow for this task)'
+          : ' (I suggest ⚡ Simple for this)';
+
+      await ctx.reply(`Choose a mode${suggestionHint}:`, {
+        reply_markup: getModeKeyboard(),
+      });
+    }
   } catch (error) {
     console.error('Error processing voice message:', error);
     await ctx.reply('Sorry, an error occurred while processing your voice message.');
+    markMessageConsumed(userIdStr);
   }
 }
 
@@ -186,7 +401,6 @@ export function createVoiceHandler(
 
 /**
  * Handles incoming voice messages with optional TTS response.
- * If the agent uses the speak tool, replies with audio.
  */
 export async function handleVoiceMessageWithTTS(
   ctx: Context,
@@ -202,6 +416,9 @@ export async function handleVoiceMessageWithTTS(
     return;
   }
 
+  const userIdStr = String(userId);
+  const modeState = getUserModeState(userIdStr);
+
   try {
     await ctx.reply('🎤 Transcribing...');
 
@@ -211,36 +428,55 @@ export async function handleVoiceMessageWithTTS(
     const result = await transcribe(fileUrl);
 
     if (!result.success || !result.text) {
-      await ctx.reply(`❌ Transcription failed: ${result.error || 'Unknown error'}`);
+      await ctx.reply(
+        `Transcription failed: ${result.error || 'Unknown error'}`
+      );
       return;
     }
 
     await ctx.reply(`📝 "${result.text}"`);
 
-    const response = await processMessage(String(userId), result.text);
+    // If user has mode selected, process immediately
+    if (modeState?.awaitingMessage) {
+      const response = await processMessage(userIdStr, result.text, modeState.mode);
 
-    // Check if the agent used the speak tool
-    if (response.speakText) {
-      await ctx.reply('🔊 Generating audio...');
+      if (response.speakText) {
+        await ctx.reply('🔊 Generating audio...');
+        const ttsResult = await synthesize(response.speakText);
 
-      const ttsResult = await synthesize(response.speakText);
-
-      if (ttsResult.success && ttsResult.audioPath) {
-        try {
-          await ctx.replyWithVoice(new InputFile(ttsResult.audioPath));
-        } finally {
-          cleanup(ttsResult.audioPath);
+        if (ttsResult.success && ttsResult.audioPath) {
+          try {
+            await ctx.replyWithVoice(new InputFile(ttsResult.audioPath));
+          } finally {
+            cleanup(ttsResult.audioPath);
+          }
+        } else {
+          await ctx.reply(
+            `Audio generation failed: ${ttsResult.error || 'Unknown error'}`
+          );
+          await ctx.reply(stripMarkdown(response.speakText));
         }
       } else {
-        await ctx.reply(`❌ Audio generation failed: ${ttsResult.error || 'Unknown error'}`);
-        await ctx.reply(stripMarkdown(response.speakText));
+        await ctx.reply(stripMarkdown(response.text));
       }
+      markMessageConsumed(userIdStr);
     } else {
-      await ctx.reply(stripMarkdown(response.text));
+      // Store transcribed text and ask for mode
+      setPendingMessage(userIdStr, result.text);
+      const suggested = suggestMode(result.text);
+      const suggestionHint =
+        suggested === 'flow'
+          ? ' (I suggest 🔄 Flow for this task)'
+          : ' (I suggest ⚡ Simple for this)';
+
+      await ctx.reply(`Choose a mode${suggestionHint}:`, {
+        reply_markup: getModeKeyboard(),
+      });
     }
   } catch (error) {
     console.error('Error processing voice message:', error);
     await ctx.reply('Sorry, an error occurred while processing your voice message.');
+    markMessageConsumed(userIdStr);
   }
 }
 
@@ -254,6 +490,12 @@ export function createVoiceHandlerWithTTS(
   cleanup: (path: string) => void
 ) {
   return async (ctx: Context): Promise<void> => {
-    await handleVoiceMessageWithTTS(ctx, transcribe, processMessage, synthesize, cleanup);
+    await handleVoiceMessageWithTTS(
+      ctx,
+      transcribe,
+      processMessage,
+      synthesize,
+      cleanup
+    );
   };
 }

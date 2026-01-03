@@ -8,9 +8,9 @@ on:
   workflow_dispatch:  # Allow manual trigger
 
 env:
-  PI_USER: ale
-  PI_PATH: ~/jarvis
-  DOCKER_PATH: ~/jarvis/docker
+  PI_USER: tomas
+  PI_PATH: ~/mate
+  DOCKER_PATH: ~/mate/docker
 
 jobs:
   test:
@@ -72,7 +72,7 @@ jobs:
           PI_HOST: ${{ secrets.PI_HOST }}
         run: |
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${PI_USER}@${PI_HOST} << 'EOF'
-            cd ~/jarvis/docker
+            cd ~/mate/docker
             echo "🔨 Building Docker image..."
             docker compose build --no-cache
             echo "🚀 Starting container..."
@@ -89,7 +89,7 @@ jobs:
         run: |
           sleep 10  # Wait for container to start
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${PI_USER}@${PI_HOST} << 'EOF'
-            cd ~/jarvis/docker
+            cd ~/mate/docker
             if docker compose ps | grep -q "healthy\|running"; then
               echo "✅ Deployment successful!"
               exit 0

@@ -1,60 +1,68 @@
-# Jarvis - Self-Improving Claude Agent
+# Mate - Hybrid Claude CLI + claude-flow Agent
 
 ## Pi Connection
 
 ```
-Host: alfajor.local
-User: ale
-SSH:  ssh ale@alfajor.local
+Host: <your-pi-hostname>
+User: <your-user>
+SSH:  ssh <your-user>@<your-pi-hostname>
 ```
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────┐
-│            Raspberry Pi Zero 2 W                 │
-│                (512MB RAM)                       │
-│                                                  │
-│  ┌─────────────┐  ┌─────────────┐  ┌──────────┐ │
-│  │  Telegram   │  │   Claude    │  │  Self-   │ │
-│  │  Bot API    │  │   Agent     │  │ Improve  │ │
-│  │  (grammy)   │  │   (SDK)     │  │ Engine   │ │
-│  └─────────────┘  └─────────────┘  └──────────┘ │
-│         │                │               │       │
-│         └────────────────┼───────────────┘       │
-│                          ▼                       │
-│                 ┌─────────────┐                  │
-│                 │   Docker    │                  │
-│                 │  Container  │                  │
-│                 └─────────────┘                  │
-└──────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│              Raspberry Pi Zero 2 W                        │
+│                 (512MB RAM)                               │
+│                                                           │
+│  ┌─────────────┐  ┌─────────────────────────────────────┐│
+│  │  Telegram   │  │           Orchestrator              ││
+│  │  Bot API    │  │  ┌───────────┐  ┌───────────────┐   ││
+│  │  (grammy)   │──▶│  │⚡ Simple  │  │ 🔄 Flow       │   ││
+│  │             │  │  │ Claude CLI│  │ claude-flow   │   ││
+│  │  [Buttons]  │  │  └───────────┘  └───────────────┘   ││
+│  └─────────────┘  └─────────────────────────────────────┘│
+│                                                           │
+│                   ┌─────────────┐                         │
+│                   │   Docker    │                         │
+│                   │  Container  │                         │
+│                   └─────────────┘                         │
+└──────────────────────────────────────────────────────────┘
 ```
+
+### Routing Modes
+
+- **⚡ Simple**: Uses `claude` CLI for fast, straightforward responses
+- **🔄 Flow**: Uses `claude-flow swarm` for complex multi-step tasks
+
+User selects mode via Telegram inline keyboard buttons before each message.
 
 ## Project Structure
 
 ```
-jarvis/
+mate/
 ├── src/
 │   ├── index.ts              # Entry point
-│   ├── agent/
-│   │   ├── agent.ts          # Claude SDK integration
-│   │   ├── memory.ts         # Conversation history per user
-│   │   └── tools/
-│   │       ├── bash.ts       # Shell command execution (whitelisted)
-│   │       └── file.ts       # File operations (path restricted)
+│   ├── orchestrator/         # NEW: Routing logic
+│   │   ├── router.ts         # Mode selection & routing
+│   │   ├── simple.ts         # Claude CLI wrapper
+│   │   └── complex.ts        # claude-flow wrapper
 │   ├── telegram/
 │   │   ├── bot.ts            # Grammy client setup
-│   │   ├── handlers.ts       # Message routing
+│   │   ├── handlers.ts       # Message routing + mode selection
+│   │   ├── mode-selector.ts  # Inline keyboard state
 │   │   └── middleware.ts     # Auth + rate limiting
+│   ├── agent/                # Legacy tools (still available)
+│   │   ├── memory.ts         # Conversation history
+│   │   └── tools/            # Bash, file tools
 │   └── security/
-│       ├── encryption.ts     # AES-256-GCM for secrets
 │       ├── whitelist.ts      # User ID validation
-│       ├── rate-limit.ts     # Token bucket limiter
-│       └── audit.ts          # Action logging
-├── tests/                    # 39 tests (vitest + msw)
+│       └── rate-limit.ts     # Token bucket limiter
+├── config/
+│   └── personality.md        # Bot personality config
+├── tests/
 ├── docker/
-│   ├── Dockerfile            # Production (ARM64, hardened)
-│   ├── Dockerfile.dev        # Development with hot reload
+│   ├── Dockerfile            # Debian-based with Claude CLI
 │   └── docker-compose.yml
 └── .env                      # Secrets (never commit)
 ```
@@ -80,117 +88,66 @@ npm run typecheck
 npm run build
 ```
 
+### First Time Setup on Pi
+
+```bash
+# After deploying, authenticate Claude CLI inside container:
+docker exec -it mate claude auth login
+
+# This opens a browser auth flow - complete it
+# Auth is persisted in Docker volume (mate-claude-auth)
+```
+
 ### Deploy to Pi
 
 ```bash
-# Full deploy (sync all + rebuild)
-scp -r /Users/ale/Desktop/projects/jarvis ale@alfajor.local:~/ && \
-ssh ale@alfajor.local "cd ~/jarvis/docker && docker compose up -d --build"
+# Via npm script
+npm run deploy
+
+# Or manually:
+ssh <user>@<pi-host> "cd ~/mate/docker && docker compose up -d --build"
 
 # Quick restart (no rebuild)
-ssh ale@alfajor.local "cd ~/jarvis/docker && docker compose restart"
+ssh <user>@<pi-host> "cd ~/mate/docker && docker compose restart"
 
 # View logs
-ssh ale@alfajor.local "cd ~/jarvis/docker && docker compose logs -f"
-
-# View last 20 log lines
-ssh ale@alfajor.local "cd ~/jarvis/docker && docker compose logs --tail 20"
+ssh <user>@<pi-host> "cd ~/mate/docker && docker compose logs -f"
 ```
 
 ### Update .env on Pi
 
 ```bash
-# Sync .env from Mac and restart
-scp /Users/ale/Desktop/projects/jarvis/.env ale@alfajor.local:~/jarvis/ && \
-ssh ale@alfajor.local "cd ~/jarvis/docker && docker compose restart"
+# Sync .env and restart
+npm run deploy:restart
 
 # Or edit directly on Pi
-ssh ale@alfajor.local "nano ~/jarvis/.env"
-ssh ale@alfajor.local "cd ~/jarvis/docker && docker compose restart"
-```
-
-### Code Changes (rebuild required)
-
-```bash
-# After editing src/ files locally, deploy:
-scp -r /Users/ale/Desktop/projects/jarvis ale@alfajor.local:~/ && \
-ssh ale@alfajor.local "cd ~/jarvis/docker && docker compose up -d --build"
+ssh <user>@<pi-host> "nano ~/mate/.env"
+ssh <user>@<pi-host> "cd ~/mate/docker && docker compose restart"
 ```
 
 ## Auto-Deploy from GitHub
 
-Two options for automatic deployment when you push to GitHub:
+### Option 1: GitHub Actions
 
-### Option 1: GitHub Actions (Recommended if Pi is accessible)
-
-Requires your Pi to be accessible from the internet (via Tailscale, Cloudflare Tunnel, or port forwarding).
+Requires Pi to be accessible from internet (Tailscale, Cloudflare Tunnel, etc).
 
 **Setup GitHub Secrets:**
+- `PI_SSH_KEY`: SSH private key
+- `PI_HOST`: Pi's hostname/IP
+- `PI_HOST_KEY`: Output of `ssh-keyscan <pi-host>`
 
-1. Generate SSH key for deployment:
-   ```bash
-   ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/github_deploy
-   ```
-
-2. Add public key to Pi:
-   ```bash
-   ssh-copy-id -i ~/.ssh/github_deploy.pub ale@alfajor.local
-   ```
-
-3. Add these secrets to your GitHub repo (Settings → Secrets → Actions):
-   - `PI_SSH_KEY`: Contents of `~/.ssh/github_deploy` (private key)
-   - `PI_HOST`: Your Pi's public IP or hostname (e.g., via Tailscale)
-   - `PI_HOST_KEY`: Output of `ssh-keyscan <pi-host>`
-
-**How it works:**
-- Push to `main` branch triggers the workflow
-- GitHub Actions runs tests, then SSHs to Pi
-- Syncs code via rsync, rebuilds Docker, restarts container
-
-### Option 2: Pi Polling (If Pi is behind NAT)
-
-The Pi periodically checks GitHub for updates and auto-deploys.
-
-**Initial Setup on Pi:**
+### Option 2: Pi Polling
 
 ```bash
-# Clone repo on Pi (first time only)
-cd ~
-git clone https://github.com/YOUR_USER/jarvis.git
-cd jarvis
-
-# Copy your .env file
-nano .env  # Add your secrets
-
-# Test the auto-update script
-./scripts/auto-update.sh
-```
-
-**Install as systemd service (auto-start on boot):**
-
-```bash
-# Copy service file
-sudo cp scripts/jarvis-updater.service /etc/systemd/system/
-
-# Edit if needed (change username, paths)
-sudo nano /etc/systemd/system/jarvis-updater.service
-
-# Enable and start
+# Install updater service
+sudo cp scripts/mate-updater.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable jarvis-updater
-sudo systemctl start jarvis-updater
+sudo systemctl enable mate-updater
+sudo systemctl start mate-updater
 
-# Check status
-sudo systemctl status jarvis-updater
-
-# View logs
-journalctl -u jarvis-updater -f
+# Check logs
+journalctl -u mate-updater -f
 ```
-
-**Configuration (environment variables):**
-- `POLL_INTERVAL`: Seconds between checks (default: 60)
-- `BRANCH`: Git branch to track (default: main)
-- `REPO_DIR`: Path to repo (default: ~/jarvis)
 
 ## Quick Commands
 
@@ -199,52 +156,59 @@ journalctl -u jarvis-updater -f
 | Run tests | `npm test` |
 | Build | `npm run build` |
 | Dev mode | `npm run dev` |
-| Deploy to Pi | `scp -r . ale@alfajor.local:~/jarvis && ssh ale@alfajor.local "cd ~/jarvis/docker && docker compose up -d --build"` |
-| Restart Pi | `ssh ale@alfajor.local "cd ~/jarvis/docker && docker compose restart"` |
-| Pi logs | `ssh ale@alfajor.local "cd ~/jarvis/docker && docker compose logs -f"` |
-| Pi shell | `ssh ale@alfajor.local "docker exec -it jarvis sh"` |
+| Deploy to Pi | `npm run deploy` |
+| Restart Pi | `npm run deploy:restart` |
+| Pi logs | `npm run deploy:logs` |
+| Pi shell | `ssh <user>@<pi-host> "docker exec -it mate sh"` |
+| Claude auth | `docker exec -it mate claude auth login` |
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `TELEGRAM_BOT_TOKEN` | Yes | From @BotFather |
-| `ANTHROPIC_API_KEY` | Yes | Claude API key |
 | `TELEGRAM_ALLOWED_USERS` | Yes | Comma-separated user IDs |
-| `CLAUDE_MODEL` | No | Default: claude-sonnet-4-20250514 |
+| `GROQ_API_KEY` | No | For voice transcription/TTS |
+| `BOT_NAME` | No | Override personality.md name |
 | `LOG_LEVEL` | No | Default: info |
+
+**Note:** `ANTHROPIC_API_KEY` is no longer required. Authentication is handled via Claude CLI using your Pro/Max account.
 
 ## Security Features
 
 - **User whitelist**: Only allowed Telegram users can interact
 - **Rate limiting**: Token bucket per user (10 req, 0.5/sec refill)
-- **Command whitelist**: Only safe bash commands allowed
-- **Path restrictions**: File operations limited to safe directories
-- **Docker hardening**: Non-root user, read-only fs, dropped capabilities
+- **Docker hardening**: Non-root user, resource limits
 - **Audit logging**: All actions logged with timestamps
-
-## Tools Available to Agent
-
-### Bash Tool
-Whitelisted commands: `echo`, `ls`, `pwd`, `cat`, `head`, `tail`, `wc`, `date`, `whoami`
-
-### File Tool
-- `read_file`: Read files in allowed paths
-- `write_file`: Write files in allowed paths
-- `list_files`: List directory contents
-
-Allowed paths: Current working directory, `/tmp`
-
-## Future: Self-Improvement Engine (Phase 5)
-
-Not yet implemented. Will include:
-- `isolated-vm` for sandboxed code execution
-- `simple-git` for checkpoint/rollback
-- `ts-morph` for AST-level code modification
-- `pm2` for process management and restarts
 
 ## Telegram Commands
 
-- `/start` - Show help message
-- `/clear` - Clear conversation history
-- Any text - Chat with Claude agent
+- `/start` - Show help message with mode explanation
+- `/clear` - Clear current mode selection
+- `/status` - Show bot and system status
+- Send text/voice → Select mode → Get response
+
+## Message Flow
+
+```
+User sends message
+        ↓
+[Show mode selection buttons]
+  ⚡ Simple | 🔄 Flow
+        ↓
+User taps button
+        ↓
+[Route to selected executor]
+  - Simple: claude -p "..." --output-format text
+  - Flow: claude-flow swarm "..." --claude --output-format json
+        ↓
+[Send response to user]
+```
+
+## Docker Volumes
+
+| Volume | Purpose |
+|--------|---------|
+| `mate-claude-auth` | Persist Claude CLI auth between rebuilds |
+| `/var/mate` | Update trigger file |
+| `../data` | Persistent app data (logs, memory) |

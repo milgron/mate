@@ -1,7 +1,7 @@
 {
-  "name": "jarvis",
+  "name": "mate",
   "version": "0.1.0",
-  "description": "Self-improving Claude agent for Raspberry Pi",
+  "description": "Hybrid Claude CLI + claude-flow agent for Raspberry Pi",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -15,10 +15,10 @@
     "typecheck": "tsc --noEmit",
     "deploy": "./scripts/deploy.sh",
     "deploy:restart": "./scripts/restart.sh",
-    "deploy:logs": "ssh ale@alfajor.local 'cd ~/jarvis/docker && docker compose logs -f'"
+    "deploy:logs": "ssh tomas@mate.local 'cd ~/mate/docker && docker compose logs -f'",
+    "claude:auth": "claude auth login"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.30.0",
     "grammy": "^1.21.0",
     "groq-sdk": "^0.37.0",
     "winston": "^3.11.0",

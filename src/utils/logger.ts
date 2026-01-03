@@ -3,7 +3,7 @@ import path from 'path';
 
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
 const LOG_DIR = path.join(DATA_DIR, 'logs');
-const LOG_FILE = path.join(LOG_DIR, 'jarvis.log');
+const LOG_FILE = path.join(LOG_DIR, 'mate.log');
 const MAX_LOG_SIZE = 1024 * 1024; // 1MB
 
 // Track if file logging is available

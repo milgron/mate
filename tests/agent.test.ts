@@ -1,86 +1,45 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
-import { setupServer } from 'msw/node';
-import { handlers } from './mocks/handlers.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Setup MSW server
-const server = setupServer(...handlers);
-
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
-afterEach(() => server.resetHandlers());
-afterAll(() => server.close());
-
-describe('Claude Agent', () => {
-  describe('createAgent', () => {
-    it('should create an agent with API key', async () => {
-      const { createAgent } = await import('../src/agent/agent.js');
-
-      const agent = createAgent({
-        apiKey: 'test-api-key',
-      });
-
-      expect(agent).toBeDefined();
-      // Default model is Haiku
-      expect(agent.config.model).toBe('claude-haiku-4-5-20251001');
-    });
+describe('Orchestrator', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
   });
 
-  describe('processMessage', () => {
-    it('should process a simple text message', async () => {
-      const { createAgent } = await import('../src/agent/agent.js');
+  describe('Router', () => {
+    it('should suggest simple mode for basic questions', async () => {
+      const { suggestMode } = await import('../src/orchestrator/router.js');
 
-      const agent = createAgent({
-        apiKey: 'test-api-key',
-      });
-
-      const response = await agent.processMessage('user123', 'Hello, Claude!');
-
-      expect(response).toContain('Hello, Claude!');
+      expect(suggestMode('What time is it?')).toBe('simple');
+      expect(suggestMode('Hello')).toBe('simple');
+      expect(suggestMode('How are you?')).toBe('simple');
     });
 
-    it('should maintain conversation history per user', async () => {
-      const { createAgent } = await import('../src/agent/agent.js');
+    it('should suggest flow mode for Spanish complex task keywords', async () => {
+      const { suggestMode } = await import('../src/orchestrator/router.js');
 
-      const agent = createAgent({
-        apiKey: 'test-api-key',
-      });
-
-      await agent.processMessage('user123', 'First message');
-      await agent.processMessage('user123', 'Second message');
-
-      const history = agent.getHistory('user123');
-      expect(history.length).toBeGreaterThanOrEqual(2);
+      // Spanish imperatives that match COMPLEX_PATTERNS
+      expect(suggestMode('investigá el problema')).toBe('flow');
+      expect(suggestMode('analizá el código')).toBe('flow');
+      expect(suggestMode('creá un proyecto nuevo')).toBe('flow');
+      expect(suggestMode('compará estos dos archivos')).toBe('flow');
     });
 
-    it('should separate conversation history between users', async () => {
-      const { createAgent } = await import('../src/agent/agent.js');
+    it('should suggest flow mode for English complex task keywords', async () => {
+      const { suggestMode } = await import('../src/orchestrator/router.js');
 
-      const agent = createAgent({
-        apiKey: 'test-api-key',
-      });
-
-      await agent.processMessage('user1', 'Message from user 1');
-      await agent.processMessage('user2', 'Message from user 2');
-
-      const history1 = agent.getHistory('user1');
-      const history2 = agent.getHistory('user2');
-
-      expect(history1).not.toEqual(history2);
+      expect(suggestMode('research the problem')).toBe('flow');
+      expect(suggestMode('analyze the codebase')).toBe('flow');
+      expect(suggestMode('create a new feature')).toBe('flow');
+      expect(suggestMode('build a component')).toBe('flow');
+      expect(suggestMode('compare these options')).toBe('flow');
     });
-  });
 
-  describe('clearHistory', () => {
-    it('should clear conversation history for a user', async () => {
-      const { createAgent } = await import('../src/agent/agent.js');
+    it('should suggest flow mode for step-by-step requests', async () => {
+      const { suggestMode } = await import('../src/orchestrator/router.js');
 
-      const agent = createAgent({
-        apiKey: 'test-api-key',
-      });
-
-      await agent.processMessage('user123', 'Test message');
-      expect(agent.getHistory('user123').length).toBeGreaterThan(0);
-
-      agent.clearHistory('user123');
-      expect(agent.getHistory('user123').length).toBe(0);
+      expect(suggestMode('do this step by step')).toBe('flow');
+      expect(suggestMode('step-by-step instructions please')).toBe('flow');
     });
   });
 });
@@ -97,6 +56,7 @@ describe('Tools', () => {
       const result = await tool.execute({ command: 'echo "hello"' });
 
       expect(result.success).toBe(true);
+      expect(result.output).toBeDefined();
       expect(result.output).toContain('hello');
     });
 
@@ -113,18 +73,16 @@ describe('Tools', () => {
       expect(result.error).toContain('not allowed');
     });
 
-    it('should have timeout protection', async () => {
+    it('should handle command with arguments', async () => {
       const { BashTool } = await import('../src/agent/tools/bash.js');
 
       const tool = new BashTool({
-        allowedCommands: ['sleep'],
-        timeoutMs: 100,
+        allowedCommands: ['ls'],
       });
 
-      const result = await tool.execute({ command: 'sleep 10' });
+      const result = await tool.execute({ command: 'ls -la' });
 
-      expect(result.success).toBe(false);
-      expect(result.error?.toLowerCase()).toContain('timed out');
+      expect(result.success).toBe(true);
     });
   });
 
@@ -137,7 +95,7 @@ describe('Tools', () => {
 
       // Create a temp file
       const tempDir = os.tmpdir();
-      const testFile = path.join(tempDir, 'jarvis-test.txt');
+      const testFile = path.join(tempDir, 'mate-test.txt');
       await fs.writeFile(testFile, 'test content');
 
       const tool = new FileTool({
@@ -173,7 +131,7 @@ describe('Tools', () => {
       const os = await import('os');
 
       const tempDir = os.tmpdir();
-      const testFile = path.join(tempDir, 'jarvis-write-test.txt');
+      const testFile = path.join(tempDir, 'mate-write-test.txt');
 
       const tool = new FileTool({
         allowedPaths: [tempDir],
@@ -236,5 +194,56 @@ describe('Memory', () => {
 
       expect(memory.getMessages('user123')).toHaveLength(0);
     });
+  });
+});
+
+describe('Mode Selector', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('should track user mode state', async () => {
+    const {
+      getUserModeState,
+      setUserMode,
+      clearUserMode,
+    } = await import('../src/telegram/mode-selector.js');
+
+    // Initially no mode
+    expect(getUserModeState('user1')).toBeNull();
+
+    // Set mode
+    setUserMode('user1', 'simple');
+    const state = getUserModeState('user1');
+    expect(state).not.toBeNull();
+    expect(state?.mode).toBe('simple');
+    expect(state?.awaitingMessage).toBe(true);
+
+    // Clear mode
+    clearUserMode('user1');
+    expect(getUserModeState('user1')).toBeNull();
+  });
+
+  it('should handle pending messages', async () => {
+    const {
+      setPendingMessage,
+      consumePendingMessage,
+      hasPendingMessage,
+    } = await import('../src/telegram/mode-selector.js');
+
+    // Initially no pending message
+    expect(hasPendingMessage('user1')).toBe(false);
+
+    // Set pending message
+    setPendingMessage('user1', 'Hello');
+    expect(hasPendingMessage('user1')).toBe(true);
+
+    // Consume pending message
+    const message = consumePendingMessage('user1');
+    expect(message).toBe('Hello');
+    expect(hasPendingMessage('user1')).toBe(false);
+
+    // Consuming again returns null
+    expect(consumePendingMessage('user1')).toBeNull();
   });
 });

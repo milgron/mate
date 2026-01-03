@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -12,43 +12,52 @@ RUN npm ci
 # Copy source and build
 COPY tsconfig.json ./
 COPY src ./src
+COPY config ./config
 RUN npm run build
 
 # Production stage
-FROM node:20-alpine AS production
+FROM node:20-bookworm-slim AS production
 
-# Add tini for proper signal handling
-RUN apk add --no-cache tini && apk upgrade --no-cache
+# Install tini and other dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends tini curl git && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Claude CLI and claude-flow globally
+RUN npm install -g @anthropic-ai/claude-code && \
+    npm install -g claude-flow@alpha || npm install -g claude-flow@latest || true
 
 WORKDIR /app
 
 # Create non-root user
-RUN addgroup -g 1001 -S jarvis && \
-    adduser -u 1001 -S jarvis -G jarvis
+RUN groupadd -g 1001 mate && \
+    useradd -u 1001 -g mate -m mate
 
 # Copy only production dependencies
 COPY package*.json ./
 RUN npm ci --only=production && npm cache clean --force
 
-# Copy built application
+# Copy built application and config
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/config ./config
 
-# Set ownership
-RUN chown -R jarvis:jarvis /app
+# Create data directory
+RUN mkdir -p /app/data && chown -R mate:mate /app
 
 # Switch to non-root user
-USER jarvis
+USER mate
 
 # Environment
 ENV NODE_ENV=production
 ENV NODE_OPTIONS="--max-old-space-size=256"
+ENV HOME=/home/mate
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "console.log('healthy')" || exit 1
 
 # Use tini as init
-ENTRYPOINT ["/sbin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Start application
 CMD ["node", "dist/index.js"]

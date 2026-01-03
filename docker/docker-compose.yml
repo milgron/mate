@@ -1,9 +1,9 @@
 services:
-  jarvis:
+  mate:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: jarvis
+    container_name: mate
     restart: unless-stopped
     env_file:
       - ../.env
@@ -23,9 +23,11 @@ services:
     # Volumes
     volumes:
       # Update trigger (allows bot to trigger self-updates)
-      - /var/jarvis:/var/jarvis
+      - /var/mate:/var/mate
       # Persistent data storage (memory, conversations, notes, logs)
       - ../data:/app/data
+      # Persist Claude CLI auth between rebuilds
+      - mate-claude-auth:/home/mate/.claude
 
     # Environment variables (loaded from ../.env via env_file)
     environment:
@@ -48,11 +50,11 @@ services:
         max-file: "3"
 
   # Development service with hot reload
-  jarvis-dev:
+  mate-dev:
     build:
       context: ..
       dockerfile: docker/Dockerfile.dev
-    container_name: jarvis-dev
+    container_name: mate-dev
     profiles:
       - dev
 
@@ -64,3 +66,6 @@ services:
       - ../.env
     environment:
       - NODE_ENV=development
+
+volumes:
+  mate-claude-auth:

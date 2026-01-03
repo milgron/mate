@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
-PI_HOST="ale@alfajor.local"
-PROJECT_PATH="/Users/ale/Desktop/projects/jarvis"
-PI_PROJECT_PATH="~/jarvis"
+PI_HOST="tomas@mate.local"
+PROJECT_PATH="$(cd "$(dirname "$0")/.." && pwd)"
+PI_PROJECT_PATH="~/mate"
 
 echo "📤 Syncing .env to Pi..."
 scp "$PROJECT_PATH/.env" "$PI_HOST:$PI_PROJECT_PATH/"

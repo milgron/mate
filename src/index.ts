@@ -5,13 +5,20 @@ import {
   createRateLimitMiddleware,
   createLoggingMiddleware,
 } from './telegram/middleware.js';
-import { createMessageHandler, createMessageHandlerWithTTS, createVoiceHandlerWithTTS } from './telegram/handlers.js';
-import { createAgent } from './agent/agent.js';
+import {
+  createMessageHandler,
+  createMessageHandlerWithTTS,
+  createVoiceHandlerWithTTS,
+  createModeCallbackHandler,
+  createModeCallbackHandlerWithTTS,
+} from './telegram/handlers.js';
 import { UserWhitelist } from './security/whitelist.js';
 import { GroqTranscriber } from './integrations/transcription.js';
 import { GroqTTS } from './integrations/tts.js';
 import { logger } from './utils/logger.js';
 import { loadPersonality } from './agent/personality.js';
+import { routeMessage, type RoutingMode } from './orchestrator/index.js';
+import { clearUserMode } from './telegram/mode-selector.js';
 
 // Track bot start time for uptime calculation
 const botStartTime = Date.now();
@@ -19,25 +26,17 @@ const botStartTime = Date.now();
 // Load personality config (for bot name)
 const personality = loadPersonality();
 
-// Load configuration from environment (BOT_NAME env var overrides personality.md)
+// Load configuration from environment
 const config = {
   telegramToken: process.env.TELEGRAM_BOT_TOKEN,
-  anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   allowedUsers: process.env.TELEGRAM_ALLOWED_USERS ?? '',
   groqApiKey: process.env.GROQ_API_KEY,
   botName: process.env.BOT_NAME ?? personality.name,
-  collectedNotesApiKey: process.env.COLLECTED_NOTES_API_KEY,
-  collectedNotesSitePath: process.env.COLLECTED_NOTES_SITE_PATH,
 };
 
 // Validate required environment variables
 if (!config.telegramToken) {
   logger.error('TELEGRAM_BOT_TOKEN is required');
-  process.exit(1);
-}
-
-if (!config.anthropicApiKey) {
-  logger.error('ANTHROPIC_API_KEY is required');
   process.exit(1);
 }
 
@@ -53,18 +52,6 @@ async function main() {
   const whitelist = UserWhitelist.fromString(config.allowedUsers);
   logger.info(`Loaded ${whitelist.size} allowed users`);
 
-  // Initialize Claude agent (Haiku by default, Opus for "think hard")
-  const agent = createAgent({
-    apiKey: config.anthropicApiKey!,
-    voiceEnabled: !!config.groqApiKey,
-    collectedNotesApiKey: config.collectedNotesApiKey,
-    collectedNotesSitePath: config.collectedNotesSitePath,
-  });
-  logger.info('Claude agent initialized (Haiku default, Opus for "think hard")');
-  if (config.collectedNotesApiKey && config.collectedNotesSitePath) {
-    logger.info('Collected Notes integration enabled');
-  }
-
   // Create Telegram bot
   const bot = createBot(config.telegramToken!);
 
@@ -77,22 +64,21 @@ async function main() {
     })
   );
 
-  // Handle /start command (MUST be before message:text handler)
+  // Handle /start command
   bot.command('start', async (ctx) => {
     const voiceFeatures = config.groqApiKey
-      ? 'You can send voice messages!\n' +
-        'Say "reply with voice" to get audio responses.\n\n'
+      ? 'You can send voice messages!\n\n'
       : '';
 
     await ctx.reply(
       `Hello! I am ${config.botName}, your AI assistant.\n\n` +
-        'Send me a message and I will help you.\n' +
-        'I can execute shell commands and manage files.\n' +
+        'Send me a message and choose a mode:\n' +
+        '⚡ Simple - Fast responses via Claude CLI\n' +
+        '🔄 Flow - Complex tasks via claude-flow\n\n' +
         voiceFeatures +
-        'Tip: Start with "think hard" for complex tasks.\n\n' +
         'Commands:\n' +
         '/start - Show this message\n' +
-        '/clear - Clear conversation history\n' +
+        '/clear - Clear mode selection\n' +
         '/status - Show bot and system status'
     );
   });
@@ -101,8 +87,8 @@ async function main() {
   bot.command('clear', async (ctx) => {
     const userId = ctx.from?.id;
     if (userId) {
-      agent.clearHistory(String(userId));
-      await ctx.reply('Conversation history cleared.');
+      clearUserMode(String(userId));
+      await ctx.reply('Mode selection cleared. Send a new message to start.');
     }
   });
 
@@ -111,7 +97,6 @@ async function main() {
     const userId = ctx.from?.id;
     if (!userId) return;
 
-    const historyLength = agent.getHistory(String(userId)).length;
     const uptime = os.uptime();
     const freeMem = os.freemem();
     const totalMem = os.totalmem();
@@ -129,12 +114,9 @@ async function main() {
     const status = [
       `📊 ${config.botName} Status`,
       '',
-      '▸ Models',
-      '  Default: Haiku',
-      '  Thinking: Opus',
-      '',
-      '▸ Your Session',
-      `  Messages: ${historyLength}`,
+      '▸ Architecture',
+      '  ⚡ Simple: Claude CLI',
+      '  🔄 Flow: claude-flow swarm',
       '',
       '▸ System',
       `  Pi uptime: ${formatTime(uptime)}`,
@@ -151,12 +133,27 @@ async function main() {
     await ctx.reply(status);
   });
 
-  // Message processor function used by all handlers
-  const processUserMessage = async (userId: string, message: string) => {
-    logger.info('Processing message', { userId, length: message.length });
-    const response = await agent.processMessage(userId, message);
-    logger.info('Message processed', { userId, responseLength: response.text.length, hasSpeech: !!response.speakText });
-    return response;
+  // Message processor function using orchestrator
+  const processUserMessage = async (
+    userId: string,
+    message: string,
+    mode: RoutingMode
+  ) => {
+    logger.info('Processing message', { userId, length: message.length, mode });
+
+    try {
+      const response = await routeMessage(message, mode);
+      logger.info('Message processed', {
+        userId,
+        responseLength: response.length,
+        mode,
+      });
+      return { text: response };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error('Error processing message', { userId, error: errorMessage });
+      throw error;
+    }
   };
 
   // Handle text and voice messages with optional TTS support
@@ -166,24 +163,43 @@ async function main() {
     logger.info('Voice support enabled: transcription (Whisper) + TTS (PlayAI)');
 
     // Text messages with TTS support
-    bot.on('message:text', createMessageHandlerWithTTS(
-      processUserMessage,
-      (text) => tts.synthesize(text),
-      GroqTTS.cleanup
-    ));
+    bot.on(
+      'message:text',
+      createMessageHandlerWithTTS(
+        processUserMessage,
+        (text) => tts.synthesize(text),
+        GroqTTS.cleanup
+      )
+    );
 
     // Voice messages with TTS support
-    bot.on('message:voice', createVoiceHandlerWithTTS(
-      (fileUrl) => transcriber.transcribeFromUrl(fileUrl),
-      processUserMessage,
-      (text) => tts.synthesize(text),
-      GroqTTS.cleanup
-    ));
+    bot.on(
+      'message:voice',
+      createVoiceHandlerWithTTS(
+        (fileUrl) => transcriber.transcribeFromUrl(fileUrl),
+        processUserMessage,
+        (text) => tts.synthesize(text),
+        GroqTTS.cleanup
+      )
+    );
+
+    // Callback queries for mode selection
+    bot.on(
+      'callback_query:data',
+      createModeCallbackHandlerWithTTS(
+        processUserMessage,
+        (text) => tts.synthesize(text),
+        GroqTTS.cleanup
+      )
+    );
   } else {
     logger.info('Voice support disabled (GROQ_API_KEY not set)');
 
     // Text messages without TTS
     bot.on('message:text', createMessageHandler(processUserMessage));
+
+    // Callback queries for mode selection
+    bot.on('callback_query:data', createModeCallbackHandler(processUserMessage));
   }
 
   // Handle errors
@@ -196,13 +212,16 @@ async function main() {
   logger.info(`${config.botName} is running!`);
 
   // Notify all whitelisted users that bot is ready
-  const startupMessage = `🤖 ${config.botName} is back online and ready!`;
+  const startupMessage = `🤖 ${config.botName} is back online and ready!\n\n⚡ Simple | 🔄 Flow`;
   for (const userId of whitelist.getAllUserIds()) {
     try {
       await bot.api.sendMessage(userId, startupMessage);
       logger.info('Sent startup notification', { userId });
     } catch (err) {
-      logger.warn('Failed to send startup notification', { userId, error: String(err) });
+      logger.warn('Failed to send startup notification', {
+        userId,
+        error: String(err),
+      });
     }
   }
 

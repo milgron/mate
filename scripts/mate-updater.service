@@ -1,0 +1,32 @@
+[Unit]
+Description=Mate Auto-Updater
+Documentation=https://github.com/your-repo/mate
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=tomas
+Group=tomas
+WorkingDirectory=/home/tomas/mate
+
+# Create trigger directory with correct permissions before starting
+ExecStartPre=/bin/bash -c 'sudo mkdir -p /var/mate && sudo chown 1001:1001 /var/mate'
+ExecStart=/home/tomas/mate/scripts/auto-update.sh --daemon
+Restart=always
+RestartSec=10
+
+# Environment
+Environment=REPO_DIR=/home/tomas/mate
+Environment=POLL_INTERVAL=60
+Environment=BRANCH=main
+Environment=TRIGGER_FILE=/var/mate/update-trigger
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mate-updater
+
+[Install]
+WantedBy=multi-user.target
