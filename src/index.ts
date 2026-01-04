@@ -7,6 +7,7 @@ import {
   createAuthMiddleware,
   createRateLimitMiddleware,
   createLoggingMiddleware,
+  createSecurityNotifier,
 } from './telegram/middleware.js';
 import {
   createMessageHandler,
@@ -56,11 +57,14 @@ async function main() {
   // Create Telegram bot
   const bot = createBot(config.telegramToken!);
 
+  // Create security notifier for alerting admins
+  const securityNotifier = createSecurityNotifier(bot.api, whitelist);
+
   // Add middleware (order matters for security!)
   // 1. Rate limit first - prevents DoS before hitting auth
   bot.use(createRateLimitMiddleware({ capacity: 10, refillRate: 0.5 }));
-  // 2. Auth second - only after rate limit check
-  bot.use(createAuthMiddleware(whitelist));
+  // 2. Auth second - only after rate limit check (with security notifications)
+  bot.use(createAuthMiddleware(whitelist, securityNotifier));
   // 3. Logging last - only for authenticated requests
   bot.use(
     createLoggingMiddleware((userId, message) => {
@@ -82,7 +86,9 @@ async function main() {
         '/simple - Switch to simple mode (default)\n' +
         '/status - Show bot and system status\n' +
         '/files - List available files\n' +
-        '/file <name> - Download a file'
+        '/file <name> - Download a file\n' +
+        '/shutdown - Shutdown Raspberry Pi\n' +
+        '/reboot - Reboot Raspberry Pi'
     );
   });
 
@@ -144,6 +150,85 @@ async function main() {
     ].join('\n');
 
     await ctx.reply(status);
+  });
+
+  // Shutdown trigger file path (host watches this)
+  const SHUTDOWN_TRIGGER = '/var/mate/shutdown';
+
+  // Track pending shutdown confirmations
+  const pendingShutdowns = new Map<string, number>();
+
+  // Handle /shutdown command
+  bot.command('shutdown', async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+
+    const userIdStr = String(userId);
+    const now = Date.now();
+
+    // Check if there's a pending confirmation (within 30 seconds)
+    const pendingTime = pendingShutdowns.get(userIdStr);
+    if (pendingTime && now - pendingTime < 30000) {
+      // Confirmed! Execute shutdown
+      pendingShutdowns.delete(userIdStr);
+
+      try {
+        // Write trigger file for host systemd service
+        fs.writeFileSync(SHUTDOWN_TRIGGER, new Date().toISOString());
+        logger.warn('Shutdown triggered by user', { userId: userIdStr });
+        await ctx.reply('⏻ Apagando Raspberry Pi...\n\nEl bot se desconectará en unos segundos.');
+
+        // Also notify all admins
+        await securityNotifier(`**Sistema apagándose**\nIniciado por: ${ctx.from?.username || userId}`);
+      } catch (err) {
+        logger.error('Failed to trigger shutdown', { error: String(err) });
+        await ctx.reply('❌ Error al apagar. Verifica que el servicio de shutdown esté configurado.');
+      }
+      return;
+    }
+
+    // Request confirmation
+    pendingShutdowns.set(userIdStr, now);
+    await ctx.reply(
+      '⚠️ **¿Estás seguro que querés apagar la Raspberry Pi?**\n\n' +
+      'Enviá /shutdown de nuevo en los próximos 30 segundos para confirmar.'
+    );
+  });
+
+  // Handle /reboot command
+  bot.command('reboot', async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+
+    const userIdStr = String(userId);
+    const now = Date.now();
+
+    // Check if there's a pending confirmation (within 30 seconds)
+    const pendingTime = pendingShutdowns.get(userIdStr + '_reboot');
+    if (pendingTime && now - pendingTime < 30000) {
+      // Confirmed! Execute reboot
+      pendingShutdowns.delete(userIdStr + '_reboot');
+
+      try {
+        // Write trigger file for host systemd service (with reboot flag)
+        fs.writeFileSync(SHUTDOWN_TRIGGER, 'reboot:' + new Date().toISOString());
+        logger.warn('Reboot triggered by user', { userId: userIdStr });
+        await ctx.reply('🔄 Reiniciando Raspberry Pi...\n\nEl bot volverá en unos minutos.');
+
+        await securityNotifier(`**Sistema reiniciándose**\nIniciado por: ${ctx.from?.username || userId}`);
+      } catch (err) {
+        logger.error('Failed to trigger reboot', { error: String(err) });
+        await ctx.reply('❌ Error al reiniciar. Verifica que el servicio de shutdown esté configurado.');
+      }
+      return;
+    }
+
+    // Request confirmation
+    pendingShutdowns.set(userIdStr + '_reboot', now);
+    await ctx.reply(
+      '⚠️ **¿Estás seguro que querés reiniciar la Raspberry Pi?**\n\n' +
+      'Enviá /reboot de nuevo en los próximos 30 segundos para confirmar.'
+    );
   });
 
   // Data directory for user files

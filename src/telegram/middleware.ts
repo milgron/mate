@@ -1,12 +1,30 @@
-import { Context, NextFunction } from 'grammy';
+import { Context, NextFunction, Api } from 'grammy';
 import { UserWhitelist } from '../security/whitelist.js';
 import { RateLimiter, RateLimiterConfig } from '../security/rate-limit.js';
 import { logger } from '../utils/logger.js';
 
+export type SecurityNotifier = (message: string) => Promise<void>;
+
+/**
+ * Creates a notifier that sends security alerts to all whitelisted users.
+ */
+export function createSecurityNotifier(api: Api, whitelist: UserWhitelist): SecurityNotifier {
+  return async (message: string) => {
+    const userIds = whitelist.getAllUserIds();
+    for (const userId of userIds) {
+      try {
+        await api.sendMessage(userId, `🚨 ${message}`);
+      } catch (err) {
+        logger.error('Failed to send security notification', { userId, error: String(err) });
+      }
+    }
+  };
+}
+
 /**
  * Middleware that only allows messages from whitelisted users.
  */
-export function createAuthMiddleware(whitelist: UserWhitelist) {
+export function createAuthMiddleware(whitelist: UserWhitelist, notifier?: SecurityNotifier) {
   return async (ctx: Context, next: NextFunction): Promise<void> => {
     const userId = ctx.from?.id;
 
@@ -17,12 +35,22 @@ export function createAuthMiddleware(whitelist: UserWhitelist) {
 
     if (!whitelist.isAllowed(userId)) {
       // Audit log unauthorized access attempts
-      logger.warn('Unauthorized access attempt', {
+      const details = {
         userId,
         username: ctx.from?.username,
         firstName: ctx.from?.first_name,
         timestamp: new Date().toISOString(),
-      });
+      };
+      logger.warn('Unauthorized access attempt', details);
+
+      // Notify admins
+      if (notifier) {
+        const userInfo = ctx.from?.username
+          ? `@${ctx.from.username}`
+          : `${ctx.from?.first_name || 'Unknown'} (${userId})`;
+        await notifier(`**Acceso no autorizado**\nUsuario: ${userInfo}\nID: ${userId}`);
+      }
+
       await ctx.reply('You are not authorized to use this bot.');
       return;
     }
