@@ -1,5 +1,8 @@
 import os from 'os';
+import fs from 'fs';
+import path from 'path';
 import { createBot, startBot } from './telegram/bot.js';
+import { InputFile } from 'grammy';
 import {
   createAuthMiddleware,
   createRateLimitMiddleware,
@@ -74,7 +77,9 @@ async function main() {
         'Commands:\n' +
         '/flow - Switch to complex mode (multi-step tasks)\n' +
         '/simple - Switch to simple mode (default)\n' +
-        '/status - Show bot and system status'
+        '/status - Show bot and system status\n' +
+        '/files - List available files\n' +
+        '/file <name> - Download a file'
     );
   });
 
@@ -136,6 +141,86 @@ async function main() {
     ].join('\n');
 
     await ctx.reply(status);
+  });
+
+  // Data directory for user files
+  const DATA_DIR = '/app/data';
+
+  // Handle /files command - list available files
+  bot.command('files', async (ctx) => {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        await ctx.reply('No hay archivos disponibles.');
+        return;
+      }
+
+      const files = fs.readdirSync(DATA_DIR, { withFileTypes: true });
+      const fileList = files
+        .filter((f) => f.isFile())
+        .map((f) => {
+          const filePath = path.join(DATA_DIR, f.name);
+          const stats = fs.statSync(filePath);
+          const sizeKB = (stats.size / 1024).toFixed(1);
+          return `• ${f.name} (${sizeKB} KB)`;
+        });
+
+      if (fileList.length === 0) {
+        await ctx.reply('No hay archivos disponibles.');
+        return;
+      }
+
+      await ctx.reply(
+        `📁 Archivos en /app/data:\n\n${fileList.join('\n')}\n\nUsa /file <nombre> para descargar`
+      );
+    } catch (error) {
+      logger.error('Error listing files', { error: String(error) });
+      await ctx.reply('Error al listar archivos.');
+    }
+  });
+
+  // Handle /file command - send a specific file
+  bot.command('file', async (ctx) => {
+    const args = ctx.message?.text?.split(' ').slice(1).join(' ').trim();
+
+    if (!args) {
+      await ctx.reply('Uso: /file <nombre>\n\nEjemplo: /file twinkle_twinkle.wav\n\nUsa /files para ver archivos disponibles.');
+      return;
+    }
+
+    // Security: prevent path traversal
+    const filename = path.basename(args);
+    const filePath = path.join(DATA_DIR, filename);
+
+    try {
+      if (!fs.existsSync(filePath)) {
+        await ctx.reply(`Archivo no encontrado: ${filename}\n\nUsa /files para ver archivos disponibles.`);
+        return;
+      }
+
+      const stats = fs.statSync(filePath);
+      if (!stats.isFile()) {
+        await ctx.reply('Solo se pueden enviar archivos, no carpetas.');
+        return;
+      }
+
+      // Send file based on extension
+      const ext = path.extname(filename).toLowerCase();
+
+      if (['.mp3', '.wav', '.ogg', '.m4a'].includes(ext)) {
+        await ctx.replyWithAudio(new InputFile(filePath));
+      } else if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
+        await ctx.replyWithPhoto(new InputFile(filePath));
+      } else if (['.mp4', '.mov', '.avi', '.webm'].includes(ext)) {
+        await ctx.replyWithVideo(new InputFile(filePath));
+      } else {
+        await ctx.replyWithDocument(new InputFile(filePath));
+      }
+
+      logger.info('File sent', { filename, size: stats.size });
+    } catch (error) {
+      logger.error('Error sending file', { filename, error: String(error) });
+      await ctx.reply(`Error al enviar archivo: ${filename}`);
+    }
   });
 
   // Message processor function using orchestrator
