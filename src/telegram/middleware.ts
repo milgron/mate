@@ -1,6 +1,7 @@
 import { Context, NextFunction } from 'grammy';
 import { UserWhitelist } from '../security/whitelist.js';
 import { RateLimiter, RateLimiterConfig } from '../security/rate-limit.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Middleware that only allows messages from whitelisted users.
@@ -15,6 +16,13 @@ export function createAuthMiddleware(whitelist: UserWhitelist) {
     }
 
     if (!whitelist.isAllowed(userId)) {
+      // Audit log unauthorized access attempts
+      logger.warn('Unauthorized access attempt', {
+        userId,
+        username: ctx.from?.username,
+        firstName: ctx.from?.first_name,
+        timestamp: new Date().toISOString(),
+      });
       await ctx.reply('You are not authorized to use this bot.');
       return;
     }
@@ -37,6 +45,12 @@ export function createRateLimitMiddleware(config: RateLimiterConfig) {
     }
 
     if (!limiter.checkAndConsume(String(userId))) {
+      // Audit log rate limit violations
+      logger.warn('Rate limit exceeded', {
+        userId,
+        username: ctx.from?.username,
+        timestamp: new Date().toISOString(),
+      });
       await ctx.reply('You are being rate limited. Please wait before sending more messages.');
       return;
     }

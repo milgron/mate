@@ -1,11 +1,18 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { logger } from '../utils/logger.js';
 import { execSimple } from './simple.js';
 import { getConversationDB, formatHistory } from '../db/conversations.js';
 import { loadLongTermMemory, initLongTermMemory, getMemoryFilePath } from '../db/longterm.js';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+// Safe environment variables - don't expose secrets to child process
+const SAFE_ENV = {
+  HOME: '/home/mate',
+  PATH: '/usr/local/bin:/usr/bin:/bin',
+  NODE_ENV: 'production',
+};
 
 export interface ComplexExecOptions {
   timeout?: number;
@@ -91,9 +98,6 @@ export async function execComplex(
   // Build task with context
   const fullTask = buildTaskWithContext(userId, task, opts.historyLimit);
 
-  // Escape the task for shell
-  const escaped = fullTask.replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$');
-
   logger.info('Executing complex task via claude-flow', {
     taskLength: task.length,
     fullTaskLength: fullTask.length,
@@ -103,13 +107,18 @@ export async function execComplex(
   const db = getConversationDB();
 
   try {
-    const { stdout, stderr } = await execAsync(
-      `claude-flow swarm "${escaped}" --claude --output-format json < /dev/null`,
+    // Use execFile with argument array to prevent shell injection
+    const { stdout, stderr } = await execFileAsync(
+      'claude-flow',
+      [
+        'swarm', fullTask,
+        '--claude',
+        '--output-format', 'json',
+      ],
       {
         timeout: opts.timeout,
         maxBuffer: opts.maxBuffer,
-        env: { ...process.env, HOME: '/home/mate' },
-        shell: '/bin/bash',
+        env: SAFE_ENV,
         cwd: '/app/data',
       }
     );
@@ -138,6 +147,7 @@ export async function execComplex(
     return result;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    // Log detailed error for debugging
     logger.error('claude-flow execution failed', { error: errorMessage });
 
     if (opts.fallbackToSimple) {
@@ -145,6 +155,7 @@ export async function execComplex(
       return execSimple(task, userId);
     }
 
-    throw new Error(`claude-flow failed: ${errorMessage}`);
+    // Sanitized error message - don't expose internal details
+    throw new Error('An error occurred processing your request.');
   }
 }

@@ -4,6 +4,9 @@ import path from 'path';
 import https from 'https';
 import http from 'http';
 
+// Security: Maximum voice file size (25MB)
+const MAX_VOICE_SIZE = 25 * 1024 * 1024;
+
 export interface TranscriptionResult {
   success: boolean;
   text?: string;
@@ -11,22 +14,44 @@ export interface TranscriptionResult {
 }
 
 /**
- * Downloads a file from URL to a temporary path.
+ * Downloads a file from URL to a temporary path with size limit.
  */
 async function downloadFile(url: string, destPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(destPath);
     const protocol = url.startsWith('https') ? https : http;
+    let downloadedSize = 0;
 
-    protocol.get(url, (response) => {
+    const request = protocol.get(url, (response) => {
       if (response.statusCode === 302 || response.statusCode === 301) {
         // Follow redirect
         const redirectUrl = response.headers.location;
         if (redirectUrl) {
+          file.close();
           downloadFile(redirectUrl, destPath).then(resolve).catch(reject);
           return;
         }
       }
+
+      // Check Content-Length header if available
+      const contentLength = parseInt(response.headers['content-length'] || '0', 10);
+      if (contentLength > MAX_VOICE_SIZE) {
+        file.close();
+        fs.unlink(destPath, () => {});
+        reject(new Error(`Voice file too large (${Math.round(contentLength / 1024 / 1024)}MB). Maximum ${MAX_VOICE_SIZE / 1024 / 1024}MB allowed.`));
+        return;
+      }
+
+      response.on('data', (chunk: Buffer) => {
+        downloadedSize += chunk.length;
+        // Security: Abort if file size exceeds limit during download
+        if (downloadedSize > MAX_VOICE_SIZE) {
+          request.destroy();
+          file.close();
+          fs.unlink(destPath, () => {});
+          reject(new Error(`Voice file too large. Maximum ${MAX_VOICE_SIZE / 1024 / 1024}MB allowed.`));
+        }
+      });
 
       response.pipe(file);
       file.on('finish', () => {

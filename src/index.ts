@@ -56,9 +56,12 @@ async function main() {
   // Create Telegram bot
   const bot = createBot(config.telegramToken!);
 
-  // Add middleware
-  bot.use(createAuthMiddleware(whitelist));
+  // Add middleware (order matters for security!)
+  // 1. Rate limit first - prevents DoS before hitting auth
   bot.use(createRateLimitMiddleware({ capacity: 10, refillRate: 0.5 }));
+  // 2. Auth second - only after rate limit check
+  bot.use(createAuthMiddleware(whitelist));
+  // 3. Logging last - only for authenticated requests
   bot.use(
     createLoggingMiddleware((userId, message) => {
       logger.info('Message received', { userId, preview: message.slice(0, 100) });

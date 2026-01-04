@@ -1,10 +1,17 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { logger } from '../utils/logger.js';
 import { getConversationDB, formatHistory } from '../db/conversations.js';
 import { loadLongTermMemory, initLongTermMemory, getMemoryFilePath } from '../db/longterm.js';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+// Safe environment variables - don't expose secrets to child process
+const SAFE_ENV = {
+  HOME: '/home/mate',
+  PATH: '/usr/local/bin:/usr/bin:/bin',
+  NODE_ENV: 'production',
+};
 
 export interface SimpleExecOptions {
   timeout?: number;
@@ -82,9 +89,6 @@ export async function execSimple(
   // Build prompt with context
   const fullPrompt = buildPromptWithContext(userId, prompt, opts.historyLimit);
 
-  // Escape the prompt for shell
-  const escaped = fullPrompt.replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$');
-
   logger.info('Executing simple prompt via Claude CLI', {
     promptLength: prompt.length,
     fullPromptLength: fullPrompt.length,
@@ -94,13 +98,18 @@ export async function execSimple(
   const db = getConversationDB();
 
   try {
-    const { stdout, stderr } = await execAsync(
-      `claude -p "${escaped}" --dangerously-skip-permissions --output-format text < /dev/null`,
+    // Use execFile with argument array to prevent shell injection
+    const { stdout, stderr } = await execFileAsync(
+      'claude',
+      [
+        '-p', fullPrompt,
+        '--dangerously-skip-permissions',
+        '--output-format', 'text',
+      ],
       {
         timeout: opts.timeout,
         maxBuffer: opts.maxBuffer,
-        env: { ...process.env, HOME: '/home/mate' },
-        shell: '/bin/bash',
+        env: SAFE_ENV,
         cwd: '/app/data',
       }
     );
@@ -119,12 +128,14 @@ export async function execSimple(
     return result;
   } catch (error: unknown) {
     const err = error as { message?: string; stderr?: string; stdout?: string; code?: number };
+    // Log detailed error for debugging, but don't expose internals to user
     logger.error('Claude CLI execution failed', {
       error: err.message,
       stderr: err.stderr,
       stdout: err.stdout,
       code: err.code,
     });
-    throw new Error(`Claude CLI failed: ${err.message || String(error)}${err.stderr ? ` - ${err.stderr}` : ''}`);
+    // Sanitized error message - don't expose internal details
+    throw new Error('An error occurred processing your request.');
   }
 }

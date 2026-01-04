@@ -2,6 +2,9 @@ import { Context, InputFile } from 'grammy';
 import type { RoutingMode } from '../orchestrator/index.js';
 import { getUserMode } from './mode-selector.js';
 
+// Security: Maximum message length to prevent abuse
+const MAX_MESSAGE_LENGTH = 8000;
+
 export type MessageProcessor = (
   userId: string,
   message: string,
@@ -48,6 +51,12 @@ export async function handleMessage(
     return;
   }
 
+  // Security: Reject messages that are too long
+  if (text.length > MAX_MESSAGE_LENGTH) {
+    await ctx.reply(`Message too long. Maximum ${MAX_MESSAGE_LENGTH} characters allowed.`);
+    return;
+  }
+
   const userIdStr = String(userId);
   const mode = getUserMode(userIdStr);
 
@@ -82,6 +91,12 @@ export async function handleMessageWithTTS(
   const text = ctx.message?.text;
 
   if (!userId || !text || text.trim() === '') {
+    return;
+  }
+
+  // Security: Reject messages that are too long
+  if (text.length > MAX_MESSAGE_LENGTH) {
+    await ctx.reply(`Message too long. Maximum ${MAX_MESSAGE_LENGTH} characters allowed.`);
     return;
   }
 
