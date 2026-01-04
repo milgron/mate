@@ -1,11 +1,8 @@
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import { logger } from '../utils/logger.js';
 import { execSimple } from './simple.js';
 import { getConversationDB, formatHistory } from '../db/conversations.js';
 import { loadLongTermMemory, initLongTermMemory, getMemoryFilePath } from '../db/longterm.js';
-
-const execFileAsync = promisify(execFile);
 
 // Safe environment variables - don't expose secrets to child process
 const SAFE_ENV = {
@@ -82,6 +79,75 @@ function buildTaskWithContext(
 }
 
 /**
+ * Execute command with spawn - prevents shell injection and properly handles stdin
+ */
+function spawnAsync(
+  command: string,
+  args: string[],
+  options: { timeout: number; maxBuffer: number; env: NodeJS.ProcessEnv; cwd: string }
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      env: options.env,
+      cwd: options.cwd,
+      stdio: ['ignore', 'pipe', 'pipe'], // Close stdin to prevent hanging
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let killed = false;
+
+    const timer = setTimeout(() => {
+      killed = true;
+      child.kill('SIGTERM');
+      reject(new Error(`Command timed out after ${options.timeout}ms`));
+    }, options.timeout);
+
+    child.stdout?.on('data', (data: Buffer) => {
+      stdout += data.toString();
+      if (stdout.length > options.maxBuffer) {
+        killed = true;
+        child.kill('SIGTERM');
+        reject(new Error('stdout maxBuffer exceeded'));
+      }
+    });
+
+    child.stderr?.on('data', (data: Buffer) => {
+      stderr += data.toString();
+      if (stderr.length > options.maxBuffer) {
+        killed = true;
+        child.kill('SIGTERM');
+        reject(new Error('stderr maxBuffer exceeded'));
+      }
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (killed) return;
+
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        const error = new Error(`Command failed with code ${code}`) as Error & {
+          code: number;
+          stdout: string;
+          stderr: string;
+        };
+        error.code = code ?? 1;
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+      }
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+/**
  * Execute a complex task using claude-flow swarm mode.
  * This handles multi-step tasks, research, analysis, etc.
  */
@@ -107,8 +173,8 @@ export async function execComplex(
   const db = getConversationDB();
 
   try {
-    // Use execFile with argument array to prevent shell injection
-    const { stdout, stderr } = await execFileAsync(
+    // Use spawn with argument array to prevent shell injection
+    const { stdout, stderr } = await spawnAsync(
       'claude-flow',
       [
         'swarm', fullTask,
