@@ -1,7 +1,7 @@
 {
   "name": "mate",
   "version": "0.1.0",
-  "description": "Hybrid Claude CLI + claude-flow agent for Raspberry Pi",
+  "description": "Anthropic SDK Telegram agent for Raspberry Pi",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -16,9 +16,12 @@
     "deploy": "./scripts/deploy.sh",
     "deploy:restart": "./scripts/restart.sh",
     "deploy:logs": "ssh tomas@mate.local 'cd ~/mate/docker && docker compose logs -f'",
-    "claude:auth": "claude auth login"
+    "version:patch": "npm version patch -m 'Release v%s'",
+    "version:minor": "npm version minor -m 'Release v%s'",
+    "version:major": "npm version major -m 'Release v%s'"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "better-sqlite3": "^12.5.0",
     "grammy": "^1.21.0",
     "groq-sdk": "^0.37.0",

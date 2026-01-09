@@ -1,48 +1,27 @@
-import { spawn } from 'child_process';
 import { logger } from '../utils/logger.js';
-import { getConversationDB, formatHistory } from '../db/conversations.js';
-import { loadLongTermMemory, initLongTermMemory, getMemoryFilePath } from '../db/longterm.js';
-
-// Safe environment variables - don't expose secrets to child process
-const SAFE_ENV = {
-  HOME: '/home/mate',
-  PATH: '/usr/local/bin:/usr/bin:/bin',
-  NODE_ENV: 'production',
-};
+import { getConversationDB } from '../db/conversations.js';
+import { loadLongTermMemory, initLongTermMemory, getMemoryDir } from '../db/longterm.js';
+import { getClient, DEFAULT_MODEL } from './client.js';
 
 export interface SimpleExecOptions {
   timeout?: number;
-  maxBuffer?: number;
+  maxTokens?: number;
   historyLimit?: number;
 }
 
 const DEFAULT_OPTIONS: Required<SimpleExecOptions> = {
   timeout: 120000, // 2 minutes
-  maxBuffer: 1024 * 1024, // 1MB
+  maxTokens: 4096,
   historyLimit: 30, // Last 30 messages
 };
 
 /**
- * Build the full prompt with memory context.
+ * Build the system prompt with memory context.
  */
-function buildPromptWithContext(
-  userId: string,
-  currentMessage: string,
-  historyLimit: number
-): string {
-  const db = getConversationDB();
-
-  // Load long-term memory
+function buildSystemPrompt(userId: string): string {
   const longTermMemory = loadLongTermMemory(userId);
+  const memoryDir = getMemoryDir(userId);
 
-  // Load short-term history
-  const history = db.getHistory(userId, historyLimit);
-  const formattedHistory = formatHistory(history);
-
-  // Get memory file path for instructions
-  const memoryPath = getMemoryFilePath(userId);
-
-  // Build full prompt
   const parts: string[] = [];
 
   if (longTermMemory) {
@@ -51,95 +30,50 @@ function buildPromptWithContext(
     parts.push('');
   }
 
-  if (formattedHistory) {
-    parts.push('=== RECENT CONVERSATION ===');
-    parts.push(formattedHistory);
-    parts.push('');
-  }
-
-  parts.push('=== CURRENT MESSAGE ===');
-  parts.push(`User: ${currentMessage}`);
-  parts.push('');
-
   parts.push('=== INSTRUCTIONS ===');
   parts.push('- You can read/write files in /app/data/');
-  parts.push(`- If something is important to remember permanently, update ${memoryPath}`);
+  parts.push(`- Memory is stored in ${memoryDir}/`);
+  parts.push('  - Update about.md for user identity info (name, location, work)');
+  parts.push('  - Update preferences.md for user preferences (language, tone)');
+  parts.push('  - Create notes/{topic}.md for topic-specific notes');
+  parts.push('  - Create journal/{YYYY-MM-DD}.md for daily summaries');
   parts.push('- Respond in the same language as the user');
 
   return parts.join('\n');
 }
 
 /**
- * Execute command with spawn - prevents shell injection and properly handles stdin
+ * Build conversation messages for the API.
  */
-function spawnAsync(
-  command: string,
-  args: string[],
-  options: { timeout: number; maxBuffer: number; env: NodeJS.ProcessEnv; cwd: string }
-): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      env: options.env,
-      cwd: options.cwd,
-      stdio: ['ignore', 'pipe', 'pipe'], // Close stdin to prevent hanging
+function buildMessages(
+  userId: string,
+  currentMessage: string,
+  historyLimit: number
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  const db = getConversationDB();
+  const history = db.getHistory(userId, historyLimit);
+
+  const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+
+  // Add history
+  for (const msg of history) {
+    messages.push({
+      role: msg.role as 'user' | 'assistant',
+      content: msg.content,
     });
+  }
 
-    let stdout = '';
-    let stderr = '';
-    let killed = false;
-
-    const timer = setTimeout(() => {
-      killed = true;
-      child.kill('SIGTERM');
-      reject(new Error(`Command timed out after ${options.timeout}ms`));
-    }, options.timeout);
-
-    child.stdout?.on('data', (data: Buffer) => {
-      stdout += data.toString();
-      if (stdout.length > options.maxBuffer) {
-        killed = true;
-        child.kill('SIGTERM');
-        reject(new Error('stdout maxBuffer exceeded'));
-      }
-    });
-
-    child.stderr?.on('data', (data: Buffer) => {
-      stderr += data.toString();
-      if (stderr.length > options.maxBuffer) {
-        killed = true;
-        child.kill('SIGTERM');
-        reject(new Error('stderr maxBuffer exceeded'));
-      }
-    });
-
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (killed) return;
-
-      if (code === 0) {
-        resolve({ stdout, stderr });
-      } else {
-        const error = new Error(`Command failed with code ${code}`) as Error & {
-          code: number;
-          stdout: string;
-          stderr: string;
-        };
-        error.code = code ?? 1;
-        error.stdout = stdout;
-        error.stderr = stderr;
-        reject(error);
-      }
-    });
-
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
+  // Add current message
+  messages.push({
+    role: 'user',
+    content: currentMessage,
   });
+
+  return messages;
 }
 
 /**
- * Execute a simple prompt using the Claude CLI.
+ * Execute a simple prompt using the Anthropic SDK.
  * This is fast and suitable for straightforward questions/tasks.
  */
 export async function execSimple(
@@ -152,40 +86,35 @@ export async function execSimple(
   // Initialize long-term memory file if it doesn't exist
   initLongTermMemory(userId);
 
-  // Build prompt with context
-  const fullPrompt = buildPromptWithContext(userId, prompt, opts.historyLimit);
-
-  logger.info('Executing simple prompt via Claude CLI', {
+  logger.info('Executing simple prompt via Anthropic SDK', {
     promptLength: prompt.length,
-    fullPromptLength: fullPrompt.length,
     timeout: opts.timeout,
+    model: DEFAULT_MODEL,
   });
 
   const db = getConversationDB();
+  const client = getClient();
 
   try {
-    // Use spawn with argument array to prevent shell injection
-    const { stdout, stderr } = await spawnAsync(
-      'claude',
-      [
-        '-p', fullPrompt,
-        '--dangerously-skip-permissions',
-        '--output-format', 'text',
-      ],
-      {
-        timeout: opts.timeout,
-        maxBuffer: opts.maxBuffer,
-        env: SAFE_ENV,
-        cwd: '/app/data',
-      }
-    );
+    const systemPrompt = buildSystemPrompt(userId);
+    const messages = buildMessages(userId, prompt, opts.historyLimit);
 
-    if (stderr) {
-      logger.warn('Claude CLI stderr output', { stderr: stderr.slice(0, 500) });
-    }
+    const response = await client.messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: opts.maxTokens,
+      system: systemPrompt,
+      messages,
+    });
 
-    const result = stdout.trim();
-    logger.info('Simple prompt completed', { responseLength: result.length });
+    // Extract text from response
+    const textContent = response.content.find((block) => block.type === 'text');
+    const result = textContent?.type === 'text' ? textContent.text : '';
+
+    logger.info('Simple prompt completed', {
+      responseLength: result.length,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    });
 
     // Save both messages to history
     db.addMessage(userId, 'user', prompt);
@@ -193,15 +122,11 @@ export async function execSimple(
 
     return result;
   } catch (error: unknown) {
-    const err = error as { message?: string; stderr?: string; stdout?: string; code?: number };
-    // Log detailed error for debugging, but don't expose internals to user
-    logger.error('Claude CLI execution failed', {
+    const err = error as { message?: string; status?: number };
+    logger.error('Anthropic SDK execution failed', {
       error: err.message,
-      stderr: err.stderr,
-      stdout: err.stdout,
-      code: err.code,
+      status: err.status,
     });
-    // Sanitized error message - don't expose internal details
     throw new Error('An error occurred processing your request.');
   }
 }

@@ -145,15 +145,15 @@ describe('Telegram Bot', () => {
     });
   });
 
-  describe('MessageHandler - New Mode Flow', () => {
+  describe('MessageHandler - Immediate Processing', () => {
     beforeEach(() => {
       vi.resetModules();
     });
 
-    it('should show mode selection for new messages', async () => {
+    it('should process messages immediately with current mode', async () => {
       const { handleMessage } = await import('../src/telegram/handlers.js');
 
-      const processMessage = vi.fn().mockResolvedValue({ text: 'Response' });
+      const processMessage = vi.fn().mockResolvedValue({ text: 'Response from agent' });
 
       const ctx: MockContext = {
         from: { id: 123456789 },
@@ -166,14 +166,9 @@ describe('Telegram Bot', () => {
 
       await handleMessage(ctx as any, processMessage);
 
-      // Should show mode selection, not process immediately
-      expect(processMessage).not.toHaveBeenCalled();
-      expect(ctx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('Choose a mode'),
-        expect.objectContaining({
-          reply_markup: expect.any(Object),
-        })
-      );
+      // Should process immediately with default mode (simple)
+      expect(processMessage).toHaveBeenCalledWith('123456789', 'Hello, agent!', 'simple');
+      expect(ctx.reply).toHaveBeenCalledWith('Response from agent');
     });
 
     it('should handle empty messages gracefully', async () => {
@@ -196,19 +191,19 @@ describe('Telegram Bot', () => {
       expect(ctx.reply).not.toHaveBeenCalled();
     });
 
-    it('should process message when mode is pre-selected', async () => {
+    it('should process message with user selected mode', async () => {
       // Import mode selector to set up state
       const { setUserMode } = await import('../src/telegram/mode-selector.js');
       const { handleMessage } = await import('../src/telegram/handlers.js');
 
-      // Pre-set mode for user
-      setUserMode('123456789', 'simple');
+      // Set mode to flow for user
+      setUserMode('123456789', 'flow');
 
       const processMessage = vi.fn().mockResolvedValue({ text: 'Response from agent' });
 
       const ctx: MockContext = {
         from: { id: 123456789 },
-        message: { text: 'Hello, agent!' },
+        message: { text: 'Analyze this code' },
         reply: vi.fn(),
         answerCallbackQuery: vi.fn(),
         deleteMessage: vi.fn(),
@@ -217,66 +212,9 @@ describe('Telegram Bot', () => {
 
       await handleMessage(ctx as any, processMessage);
 
-      // Should process with the pre-selected mode
-      expect(processMessage).toHaveBeenCalledWith('123456789', 'Hello, agent!', 'simple');
+      // Should process with flow mode
+      expect(processMessage).toHaveBeenCalledWith('123456789', 'Analyze this code', 'flow');
       expect(ctx.reply).toHaveBeenCalledWith('Response from agent');
-    });
-  });
-
-  describe('ModeCallback Handler', () => {
-    beforeEach(() => {
-      vi.resetModules();
-    });
-
-    it('should process pending message when mode is selected', async () => {
-      const { setPendingMessage } = await import('../src/telegram/mode-selector.js');
-      const { handleModeCallback } = await import('../src/telegram/handlers.js');
-
-      // Set up pending message
-      setPendingMessage('123456789', 'Hello!');
-
-      const processMessage = vi.fn().mockResolvedValue({ text: 'Response' });
-
-      const ctx: MockContext = {
-        from: { id: 123456789 },
-        callbackQuery: { data: 'mode:simple' },
-        reply: vi.fn(),
-        answerCallbackQuery: vi.fn(),
-        deleteMessage: vi.fn(),
-        editMessageText: vi.fn(),
-      };
-
-      await handleModeCallback(ctx as any, processMessage);
-
-      expect(ctx.answerCallbackQuery).toHaveBeenCalled();
-      expect(processMessage).toHaveBeenCalledWith('123456789', 'Hello!', 'simple');
-      expect(ctx.reply).toHaveBeenCalledWith('Response');
-    });
-
-    it('should set mode when no pending message', async () => {
-      const { handleModeCallback } = await import('../src/telegram/handlers.js');
-      const { getUserModeState } = await import('../src/telegram/mode-selector.js');
-
-      const processMessage = vi.fn();
-
-      const ctx: MockContext = {
-        from: { id: 123456789 },
-        callbackQuery: { data: 'mode:flow' },
-        reply: vi.fn(),
-        answerCallbackQuery: vi.fn(),
-        deleteMessage: vi.fn(),
-        editMessageText: vi.fn(),
-      };
-
-      await handleModeCallback(ctx as any, processMessage);
-
-      expect(ctx.answerCallbackQuery).toHaveBeenCalled();
-      expect(processMessage).not.toHaveBeenCalled();
-
-      // Mode should be set
-      const state = getUserModeState('123456789');
-      expect(state?.mode).toBe('flow');
-      expect(state?.awaitingMessage).toBe(true);
     });
   });
 });

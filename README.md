@@ -1,6 +1,6 @@
 # Mate
 
-Personal AI assistant running on Raspberry Pi, powered by Claude CLI and accessible via Telegram.
+Personal AI assistant running on Raspberry Pi, powered by the Anthropic SDK and accessible via Telegram.
 
 ## Architecture
 
@@ -9,11 +9,11 @@ Personal AI assistant running on Raspberry Pi, powered by Claude CLI and accessi
 │              Raspberry Pi (<your-pi>)                   │
 │                                                         │
 │  ┌──────────┐    ┌─────────────┐    ┌───────────────┐  │
-│  │ Telegram │───▶│ Orchestrator│───▶│  Claude CLI   │  │
-│  │   Bot    │    │   Router    │    │  (simple)     │  │
+│  │ Telegram │───▶│ Orchestrator│───▶│ Anthropic SDK │  │
+│  │   Bot    │    │   Router    │    │  claude-sonnet│  │
 │  │ (grammy) │    │             │    ├───────────────┤  │
-│  └──────────┘    │ ⚡ Simple   │    │ claude-flow   │  │
-│                  │ 🔄 Flow     │───▶│  (complex)    │  │
+│  └──────────┘    │ ⚡ Simple   │    │   Extended    │  │
+│                  │ 🔄 Complex  │───▶│   Thinking    │  │
 │                  └─────────────┘    └───────────────┘  │
 │                                                         │
 │                    Docker Container                     │
@@ -24,18 +24,63 @@ Personal AI assistant running on Raspberry Pi, powered by Claude CLI and accessi
 
 1. Send a message to your Telegram bot
 2. Choose a mode via inline buttons:
-   - **⚡ Simple** - Uses `claude` CLI for quick responses
-   - **🔄 Flow** - Uses `claude-flow` for complex, multi-step tasks
+   - **⚡ Simple** - Direct API call for quick responses
+   - **🔄 Complex** - Extended thinking for multi-step reasoning
 3. Get your response (text or voice)
 
 ## Features
 
-- **Dual-mode processing**: Simple queries via Claude CLI, complex tasks via claude-flow
+- **Dual-mode processing**: Simple queries vs complex tasks with extended thinking
 - **Voice support**: Send voice messages (transcribed via Groq), receive TTS responses
 - **User whitelist**: Only authorized Telegram users can interact
 - **Rate limiting**: Token bucket per user to prevent abuse
-- **Conversation memory**: Maintains context per user session
+- **Conversation memory**: SQLite-based context per user session
+- **Long-term memory**: Human-readable markdown files (File over App philosophy)
 - **Blog integration**: Optional Collected Notes API for publishing
+
+## Memory System
+
+Mate uses a **File over App** philosophy for long-term memory: files are human-readable markdown that outlive the application.
+
+### Structure
+
+```
+data/memory/{userId}/
+├── about.md           # User identity (name, location, work)
+├── preferences.md     # User preferences (language, tone)
+├── notes/             # Topic-specific notes
+│   └── {topic}.md
+└── journal/           # Daily entries
+    └── {YYYY-MM-DD}.md
+```
+
+### Example: about.md
+
+```markdown
+# About
+
+## Identity
+- **Name**: Juan
+- **Location**: Buenos Aires
+- **Timezone**: America/Argentina/Buenos_Aires
+
+## Work
+- **Role**: Software Engineer
+- **Company**: Acme Corp
+
+## Context
+Working on a personal AI assistant project.
+
+---
+*Last updated: 2026-01-09*
+```
+
+### Benefits
+
+- **Portable**: Open in Obsidian, VS Code, any text editor
+- **Versionable**: Git-friendly, clear diffs
+- **Editable**: Manually adjust memories if needed
+- **Future-proof**: Still readable in 2060 without special software
 
 ## Setup
 
@@ -44,7 +89,7 @@ Personal AI assistant running on Raspberry Pi, powered by Claude CLI and accessi
 - Raspberry Pi (tested on Pi Zero 2 W) or any Linux server
 - Docker and Docker Compose
 - Node.js 20+ (for local development)
-- Claude Pro/Max subscription (for CLI auth)
+- Anthropic API key
 
 ### 1. Clone and Configure
 
@@ -61,8 +106,11 @@ nano .env
 ```
 
 Required variables:
+- `ANTHROPIC_API_KEY` - Get from [console.anthropic.com](https://console.anthropic.com)
 - `TELEGRAM_BOT_TOKEN` - Get from [@BotFather](https://t.me/BotFather)
 - `TELEGRAM_ALLOWED_USERS` - Your Telegram user ID (get from [@userinfobot](https://t.me/userinfobot))
+
+Optional:
 - `GROQ_API_KEY` - For voice transcription (get from [Groq Console](https://console.groq.com))
 
 ### 3. Deploy with Docker
@@ -71,16 +119,6 @@ Required variables:
 cd docker
 docker compose up -d --build
 ```
-
-### 4. Authenticate Claude CLI
-
-First-time only - authenticate with your Claude Pro/Max account:
-
-```bash
-docker exec -it mate claude auth login
-```
-
-Follow the browser authentication flow. The auth persists in a Docker volume.
 
 ## Development
 
@@ -128,6 +166,18 @@ sudo systemctl enable mate-updater
 sudo systemctl start mate-updater
 ```
 
+## Versioning
+
+This project follows [Semantic Versioning](https://semver.org/):
+
+```bash
+npm run version:patch   # Bug fixes (0.1.0 → 0.1.1)
+npm run version:minor   # New features (0.1.0 → 0.2.0)
+npm run version:major   # Breaking changes (0.1.0 → 1.0.0)
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and [CONTRIBUTING.md](CONTRIBUTING.md) for the release workflow.
+
 ## Project Structure
 
 ```
@@ -135,17 +185,22 @@ mate/
 ├── src/
 │   ├── index.ts              # Entry point
 │   ├── orchestrator/         # Message routing
+│   │   ├── client.ts         # Anthropic SDK client
 │   │   ├── router.ts         # Mode suggestion logic
-│   │   ├── simple.ts         # Claude CLI wrapper
-│   │   └── complex.ts        # claude-flow wrapper
+│   │   ├── simple.ts         # Direct API wrapper
+│   │   └── complex.ts        # Extended thinking wrapper
 │   ├── telegram/
 │   │   ├── bot.ts            # Grammy client
 │   │   ├── handlers.ts       # Message handlers
-│   │   ├── mode-selector.ts  # Inline keyboard UI
+│   │   ├── mode-selector.ts  # Mode state management
 │   │   └── middleware.ts     # Auth + rate limiting
+│   ├── db/
+│   │   ├── conversations.ts  # SQLite conversation history
+│   │   └── longterm.ts       # Markdown memory manager
 │   ├── agent/
-│   │   ├── memory.ts         # Conversation history
+│   │   ├── memory.ts         # Conversation memory class
 │   │   └── tools/            # Available tools
+│   │       └── memory.ts     # Memory tool (remember/recall)
 │   └── security/
 │       ├── whitelist.ts      # User authorization
 │       └── rate-limit.ts     # Token bucket limiter
@@ -155,6 +210,10 @@ mate/
 ├── scripts/
 │   ├── deploy.sh             # Manual deploy script
 │   └── mate-updater.service  # Systemd auto-updater
+├── data/                     # Runtime data (not in git)
+│   └── memory/{userId}/      # User memory files
+├── CHANGELOG.md              # Version history
+├── CONTRIBUTING.md           # Development guide
 └── tests/                    # Vitest test suite
 ```
 
@@ -162,10 +221,10 @@ mate/
 
 | Variable | Required | Description |
 |----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | **Yes** | API key from console.anthropic.com |
 | `TELEGRAM_BOT_TOKEN` | Yes | From @BotFather |
 | `TELEGRAM_ALLOWED_USERS` | Yes | Comma-separated user IDs |
-| `GROQ_API_KEY` | Yes | For voice transcription |
-| `MASTER_ENCRYPTION_KEY` | No | For encrypting stored data |
+| `GROQ_API_KEY` | No | For voice transcription/TTS |
 | `LOG_LEVEL` | No | `debug`, `info`, `warn`, `error` |
 | `COLLECTED_NOTES_API_KEY` | No | For blog integration |
 | `COLLECTED_NOTES_SITE_PATH` | No | Blog site path |
@@ -173,8 +232,17 @@ mate/
 ## Telegram Commands
 
 - `/start` - Show help message
+- `/status` - Show bot and system status
 - `/clear` - Clear conversation history
 - Any text or voice message - Chat with the assistant
+
+## API Pricing
+
+Using `claude-sonnet-4-20250514`:
+- Input: $3 / million tokens
+- Output: $15 / million tokens
+
+Extended thinking mode uses additional tokens for reasoning.
 
 ## License
 

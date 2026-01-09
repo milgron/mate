@@ -1,26 +1,23 @@
+import {
+  getMemoryDir,
+  getMemoryFilePath,
+  writeNote,
+  readNote,
+  listNotes,
+  addJournalEntry,
+  readJournalEntry,
+  initLongTermMemory,
+} from '../../db/longterm.js';
+import {
+  updateMarkdownListItem,
+  getDateString,
+} from '../../utils/markdown.js';
 import fs from 'fs';
 import path from 'path';
 
-const DATA_DIR = process.env.DATA_DIR || '/app/data';
-const MEMORY_DIR = path.join(DATA_DIR, 'memory');
-
-// Memory categories with their purposes
-export const MEMORY_CATEGORIES = {
-  todo: 'Tasks and action items to complete',
-  posts: 'Blog posts and content ideas',
-  today: "Today's tasks (subset of todo for current day)",
-  memory: 'Important facts and things to remember',
-  random: 'Everything else that doesn\'t fit other categories',
-} as const;
-
-export type MemoryCategory = keyof typeof MEMORY_CATEGORIES;
-
-export interface MemoryEntry {
-  value: string;
-  timestamp: string;
-  category: MemoryCategory;
-}
-
+/**
+ * Result type for memory operations.
+ */
 export interface MemoryResult {
   success: boolean;
   data?: unknown;
@@ -28,152 +25,73 @@ export interface MemoryResult {
 }
 
 /**
- * Ensures a directory exists, creating it if necessary.
+ * Memory file types.
  */
-function ensureDir(dir: string): void {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-}
+export type MemoryFile = 'about' | 'preferences';
 
 /**
- * Gets the category directory path for a user.
- */
-function getCategoryPath(userId: string, category: MemoryCategory): string {
-  const categoryDir = path.join(MEMORY_DIR, userId, category);
-  ensureDir(categoryDir);
-  return path.join(categoryDir, 'items.json');
-}
-
-/**
- * Gets the legacy memory file path for migration.
- */
-function getLegacyMemoryPath(userId: string): string {
-  return path.join(MEMORY_DIR, userId, 'facts.json');
-}
-
-/**
- * Loads memories for a user in a specific category.
- */
-function loadCategoryMemories(userId: string, category: MemoryCategory): Record<string, MemoryEntry> {
-  const memoryPath = getCategoryPath(userId, category);
-  if (fs.existsSync(memoryPath)) {
-    try {
-      const content = fs.readFileSync(memoryPath, 'utf-8');
-      return JSON.parse(content);
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
-
-/**
- * Saves memories for a user in a specific category.
- */
-function saveCategoryMemories(userId: string, category: MemoryCategory, memories: Record<string, MemoryEntry>): void {
-  const memoryPath = getCategoryPath(userId, category);
-  fs.writeFileSync(memoryPath, JSON.stringify(memories, null, 2));
-}
-
-/**
- * Loads all memories across all categories for a user.
- */
-function loadAllMemories(userId: string): Record<MemoryCategory, Record<string, MemoryEntry>> {
-  const allMemories: Record<MemoryCategory, Record<string, MemoryEntry>> = {
-    todo: {},
-    posts: {},
-    today: {},
-    memory: {},
-    random: {},
-  };
-
-  for (const category of Object.keys(MEMORY_CATEGORIES) as MemoryCategory[]) {
-    allMemories[category] = loadCategoryMemories(userId, category);
-  }
-
-  return allMemories;
-}
-
-/**
- * Migrates legacy flat facts.json to new category-based structure.
- * Existing memories go to 'random' category.
- */
-function migrateIfNeeded(userId: string): void {
-  const legacyPath = getLegacyMemoryPath(userId);
-
-  if (fs.existsSync(legacyPath)) {
-    try {
-      const content = fs.readFileSync(legacyPath, 'utf-8');
-      const legacyMemories = JSON.parse(content);
-
-      // Move all legacy memories to 'random' category
-      const randomMemories = loadCategoryMemories(userId, 'random');
-
-      for (const [key, value] of Object.entries(legacyMemories)) {
-        const legacyEntry = value as { value: string; timestamp: string };
-        randomMemories[key] = {
-          value: legacyEntry.value,
-          timestamp: legacyEntry.timestamp,
-          category: 'random',
-        };
-      }
-
-      saveCategoryMemories(userId, 'random', randomMemories);
-
-      // Rename legacy file to mark as migrated
-      const backupPath = path.join(MEMORY_DIR, userId, 'facts.json.migrated');
-      fs.renameSync(legacyPath, backupPath);
-    } catch {
-      // Migration failed, leave legacy file in place
-    }
-  }
-}
-
-/**
- * Validates that a category string is valid.
- */
-function isValidCategory(category: string): category is MemoryCategory {
-  return category in MEMORY_CATEGORIES;
-}
-
-/**
- * Tool for persistent memory storage with category organization.
- * Allows the agent to remember facts across sessions, organized by category.
+ * Tool for human-readable persistent memory storage.
+ *
+ * Files are stored as markdown for easy reading/editing by humans.
+ * Structure:
+ *   data/memory/{userId}/
+ *   ├── about.md        # User identity
+ *   ├── preferences.md  # User preferences
+ *   ├── notes/          # Topic-specific notes
+ *   └── journal/        # Daily entries
  */
 export class MemoryTool {
   private currentUserId: string = '';
 
   /**
-   * Sets the current user context and runs migration if needed.
+   * Set the current user context.
    */
   setUser(userId: string): void {
     this.currentUserId = userId;
-    migrateIfNeeded(userId);
+    initLongTermMemory(userId);
   }
 
   /**
-   * Stores a fact in memory under a specific category.
+   * Remember a fact by updating the appropriate markdown file.
+   *
+   * @param key - The key/field to update (e.g., "Name", "Language")
+   * @param value - The value to store
+   * @param file - Which file to update: 'about' or 'preferences'
    */
-  async remember(input: { key: string; value: string; category?: string }): Promise<MemoryResult> {
+  async remember(input: {
+    key: string;
+    value: string;
+    file?: MemoryFile;
+  }): Promise<MemoryResult> {
     if (!this.currentUserId) {
       return { success: false, error: 'No user context set' };
     }
 
-    const category: MemoryCategory = input.category && isValidCategory(input.category)
-      ? input.category
-      : 'random';
+    const file = input.file || 'about';
 
     try {
-      const memories = loadCategoryMemories(this.currentUserId, category);
-      memories[input.key] = {
-        value: input.value,
-        timestamp: new Date().toISOString(),
-        category,
-      };
-      saveCategoryMemories(this.currentUserId, category, memories);
+      const filePath = getMemoryFilePath(this.currentUserId, file);
+      let content = '';
 
-      return { success: true, data: `Remembered in ${category}: ${input.key}` };
+      if (fs.existsSync(filePath)) {
+        content = fs.readFileSync(filePath, 'utf-8');
+      }
+
+      // Update the key-value in the file
+      const updatedContent = updateMarkdownListItem(content, input.key, input.value);
+
+      // Update the "Last updated" timestamp
+      const finalContent = updatedContent.replace(
+        /\*Last updated: .+\*/,
+        `*Last updated: ${getDateString()}*`
+      );
+
+      fs.writeFileSync(filePath, finalContent);
+
+      return {
+        success: true,
+        data: `Remembered in ${file}.md: ${input.key} = ${input.value}`,
+      };
     } catch (error: unknown) {
       const err = error as { message?: string };
       return { success: false, error: err.message || String(error) };
@@ -181,27 +99,44 @@ export class MemoryTool {
   }
 
   /**
-   * Recalls a fact from memory. Searches across all categories if not specified.
+   * Recall a fact by searching memory files.
+   *
+   * @param key - The key to search for
+   * @param file - Optional: specific file to search
    */
-  async recall(input: { key: string; category?: string }): Promise<MemoryResult> {
+  async recall(input: { key: string; file?: MemoryFile }): Promise<MemoryResult> {
     if (!this.currentUserId) {
       return { success: false, error: 'No user context set' };
     }
 
     try {
-      // If category specified, search only there
-      if (input.category && isValidCategory(input.category)) {
-        const memories = loadCategoryMemories(this.currentUserId, input.category);
-        const memory = memories[input.key];
-        return { success: true, data: memory || null };
-      }
+      const filesToSearch: MemoryFile[] = input.file
+        ? [input.file]
+        : ['about', 'preferences'];
 
-      // Otherwise search all categories
-      const allMemories = loadAllMemories(this.currentUserId);
-      for (const category of Object.keys(MEMORY_CATEGORIES) as MemoryCategory[]) {
-        const memory = allMemories[category][input.key];
-        if (memory) {
-          return { success: true, data: memory };
+      for (const file of filesToSearch) {
+        const filePath = getMemoryFilePath(this.currentUserId, file);
+
+        if (fs.existsSync(filePath)) {
+          const content = fs.readFileSync(filePath, 'utf-8');
+
+          // Search for the key in markdown list format
+          const regex = new RegExp(
+            `^-\\s+(?:\\*\\*)?${input.key}(?:\\*\\*)?\\s*:\\s*(.+)$`,
+            'im'
+          );
+          const match = content.match(regex);
+
+          if (match && match[1]) {
+            return {
+              success: true,
+              data: {
+                key: input.key,
+                value: match[1].trim(),
+                file,
+              },
+            };
+          }
         }
       }
 
@@ -213,52 +148,23 @@ export class MemoryTool {
   }
 
   /**
-   * Lists all facts in memory, optionally filtered by category.
+   * Add or update a note on a specific topic.
    */
-  async listMemories(input?: { category?: string }): Promise<MemoryResult> {
+  async addNote(input: { topic: string; content: string }): Promise<MemoryResult> {
     if (!this.currentUserId) {
       return { success: false, error: 'No user context set' };
     }
 
     try {
-      // If category specified, list only that category
-      if (input?.category && isValidCategory(input.category)) {
-        const memories = loadCategoryMemories(this.currentUserId, input.category);
-        const keys = Object.keys(memories);
-        return {
-          success: true,
-          data: {
-            category: input.category,
-            count: keys.length,
-            keys,
-            memories,
-          },
-        };
-      }
+      const header = `# ${input.topic}\n\n`;
+      const footer = `\n\n---\n*Last updated: ${getDateString()}*\n`;
+      const fullContent = header + input.content + footer;
 
-      // Otherwise list all categories with summary
-      const allMemories = loadAllMemories(this.currentUserId);
-      const summary: Record<string, { count: number; keys: string[]; memories: Record<string, MemoryEntry> }> = {};
-      let totalCount = 0;
-
-      for (const category of Object.keys(MEMORY_CATEGORIES) as MemoryCategory[]) {
-        const memories = allMemories[category];
-        const keys = Object.keys(memories);
-        totalCount += keys.length;
-        summary[category] = {
-          count: keys.length,
-          keys,
-          memories,
-        };
-      }
+      writeNote(this.currentUserId, input.topic, fullContent);
 
       return {
         success: true,
-        data: {
-          totalCount,
-          categories: MEMORY_CATEGORIES,
-          summary,
-        },
+        data: `Note saved: ${input.topic}`,
       };
     } catch (error: unknown) {
       const err = error as { message?: string };
@@ -267,32 +173,123 @@ export class MemoryTool {
   }
 
   /**
-   * Forgets a fact from memory.
+   * Read a specific note.
    */
-  async forget(input: { key: string; category?: string }): Promise<MemoryResult> {
+  async getNote(input: { topic: string }): Promise<MemoryResult> {
     if (!this.currentUserId) {
       return { success: false, error: 'No user context set' };
     }
 
     try {
-      // If category specified, delete only from there
-      if (input.category && isValidCategory(input.category)) {
-        const memories = loadCategoryMemories(this.currentUserId, input.category);
-        if (memories[input.key]) {
-          delete memories[input.key];
-          saveCategoryMemories(this.currentUserId, input.category, memories);
-          return { success: true, data: `Forgot from ${input.category}: ${input.key}` };
-        }
-        return { success: true, data: `No memory found for: ${input.key} in ${input.category}` };
+      const content = readNote(this.currentUserId, input.topic);
+
+      if (content) {
+        return { success: true, data: { topic: input.topic, content } };
       }
 
-      // Otherwise search and delete from any category
-      const allMemories = loadAllMemories(this.currentUserId);
-      for (const category of Object.keys(MEMORY_CATEGORIES) as MemoryCategory[]) {
-        if (allMemories[category][input.key]) {
-          delete allMemories[category][input.key];
-          saveCategoryMemories(this.currentUserId, category, allMemories[category]);
-          return { success: true, data: `Forgot from ${category}: ${input.key}` };
+      return { success: true, data: null };
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      return { success: false, error: err.message || String(error) };
+    }
+  }
+
+  /**
+   * List all notes.
+   */
+  async listNotes(): Promise<MemoryResult> {
+    if (!this.currentUserId) {
+      return { success: false, error: 'No user context set' };
+    }
+
+    try {
+      const notes = listNotes(this.currentUserId);
+      return { success: true, data: { count: notes.length, topics: notes } };
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      return { success: false, error: err.message || String(error) };
+    }
+  }
+
+  /**
+   * Add a journal entry for today.
+   */
+  async addJournalEntry(input: { content: string; date?: string }): Promise<MemoryResult> {
+    if (!this.currentUserId) {
+      return { success: false, error: 'No user context set' };
+    }
+
+    try {
+      addJournalEntry(this.currentUserId, input.content, input.date);
+      const date = input.date || getDateString();
+
+      return {
+        success: true,
+        data: `Journal entry added for ${date}`,
+      };
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      return { success: false, error: err.message || String(error) };
+    }
+  }
+
+  /**
+   * Read a journal entry.
+   */
+  async getJournalEntry(input: { date?: string }): Promise<MemoryResult> {
+    if (!this.currentUserId) {
+      return { success: false, error: 'No user context set' };
+    }
+
+    try {
+      const date = input.date || getDateString();
+      const content = readJournalEntry(this.currentUserId, date);
+
+      if (content) {
+        return { success: true, data: { date, content } };
+      }
+
+      return { success: true, data: null };
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      return { success: false, error: err.message || String(error) };
+    }
+  }
+
+  /**
+   * Forget a fact by removing it from the file.
+   */
+  async forget(input: { key: string; file?: MemoryFile }): Promise<MemoryResult> {
+    if (!this.currentUserId) {
+      return { success: false, error: 'No user context set' };
+    }
+
+    try {
+      const filesToSearch: MemoryFile[] = input.file
+        ? [input.file]
+        : ['about', 'preferences'];
+
+      for (const file of filesToSearch) {
+        const filePath = getMemoryFilePath(this.currentUserId, file);
+
+        if (fs.existsSync(filePath)) {
+          let content = fs.readFileSync(filePath, 'utf-8');
+
+          // Remove the line with the key
+          const regex = new RegExp(
+            `^-\\s+(?:\\*\\*)?${input.key}(?:\\*\\*)?\\s*:.*$\\n?`,
+            'im'
+          );
+
+          if (regex.test(content)) {
+            content = content.replace(regex, '');
+            fs.writeFileSync(filePath, content);
+
+            return {
+              success: true,
+              data: `Forgot: ${input.key} from ${file}.md`,
+            };
+          }
         }
       }
 
@@ -304,44 +301,23 @@ export class MemoryTool {
   }
 
   /**
-   * Moves a memory from one category to another.
-   * Useful for moving items from todo to today, or completing tasks.
+   * Delete a note.
    */
-  async moveMemory(input: { key: string; fromCategory: string; toCategory: string }): Promise<MemoryResult> {
+  async deleteNote(input: { topic: string }): Promise<MemoryResult> {
     if (!this.currentUserId) {
       return { success: false, error: 'No user context set' };
     }
 
-    if (!isValidCategory(input.fromCategory)) {
-      return { success: false, error: `Invalid source category: ${input.fromCategory}. Valid: ${Object.keys(MEMORY_CATEGORIES).join(', ')}` };
-    }
-
-    if (!isValidCategory(input.toCategory)) {
-      return { success: false, error: `Invalid target category: ${input.toCategory}. Valid: ${Object.keys(MEMORY_CATEGORIES).join(', ')}` };
-    }
-
     try {
-      const fromMemories = loadCategoryMemories(this.currentUserId, input.fromCategory);
-      const memory = fromMemories[input.key];
+      const safeTopic = input.topic.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      const notePath = path.join(getMemoryDir(this.currentUserId), 'notes', `${safeTopic}.md`);
 
-      if (!memory) {
-        return { success: false, error: `No memory found for: ${input.key} in ${input.fromCategory}` };
+      if (fs.existsSync(notePath)) {
+        fs.unlinkSync(notePath);
+        return { success: true, data: `Deleted note: ${input.topic}` };
       }
 
-      // Remove from source
-      delete fromMemories[input.key];
-      saveCategoryMemories(this.currentUserId, input.fromCategory, fromMemories);
-
-      // Add to target with updated category
-      const toMemories = loadCategoryMemories(this.currentUserId, input.toCategory);
-      toMemories[input.key] = {
-        ...memory,
-        category: input.toCategory,
-        timestamp: new Date().toISOString(), // Update timestamp on move
-      };
-      saveCategoryMemories(this.currentUserId, input.toCategory, toMemories);
-
-      return { success: true, data: `Moved "${input.key}" from ${input.fromCategory} to ${input.toCategory}` };
+      return { success: true, data: `Note not found: ${input.topic}` };
     } catch (error: unknown) {
       const err = error as { message?: string };
       return { success: false, error: err.message || String(error) };
@@ -352,35 +328,33 @@ export class MemoryTool {
    * Returns the tool definitions for Claude.
    */
   getToolDefinitions() {
-    const categoryList = Object.keys(MEMORY_CATEGORIES).join(', ');
-    const categoryDescriptions = Object.entries(MEMORY_CATEGORIES)
-      .map(([cat, desc]) => `  - ${cat}: ${desc}`)
-      .join('\n');
-
     return [
       {
         name: 'remember',
-        description: `Store a fact or piece of information in persistent memory under a specific category. Memory persists across sessions.
+        description: `Store a fact in persistent memory. Memory is stored as human-readable markdown.
 
-Available categories:
-${categoryDescriptions}
+Files:
+- about: User identity (name, location, work, context)
+- preferences: User preferences (language, tone, technical settings)
 
-Use the appropriate category to keep memories organized. Default is 'random' if not specified.`,
+Examples:
+- remember(key: "Name", value: "Juan", file: "about")
+- remember(key: "Language", value: "Spanish", file: "preferences")`,
         input_schema: {
           type: 'object' as const,
           properties: {
             key: {
               type: 'string',
-              description: 'A descriptive key for the memory (e.g., "buy_groceries", "blog_idea_ai", "user_name")',
+              description: 'The field name (e.g., "Name", "Location", "Language")',
             },
             value: {
               type: 'string',
-              description: 'The value or fact to remember',
+              description: 'The value to store',
             },
-            category: {
+            file: {
               type: 'string',
-              enum: Object.keys(MEMORY_CATEGORIES),
-              description: `Category for the memory. Options: ${categoryList}. Default: random`,
+              enum: ['about', 'preferences'],
+              description: 'Which file to update. Default: about',
             },
           },
           required: ['key', 'value'],
@@ -388,36 +362,95 @@ Use the appropriate category to keep memories organized. Default is 'random' if 
       },
       {
         name: 'recall',
-        description: 'Retrieve a specific fact from persistent memory by its key. Searches all categories unless one is specified.',
+        description: 'Retrieve a specific fact from memory by its key.',
         input_schema: {
           type: 'object' as const,
           properties: {
             key: {
               type: 'string',
-              description: 'The key of the memory to recall',
+              description: 'The key to search for',
             },
-            category: {
+            file: {
               type: 'string',
-              enum: Object.keys(MEMORY_CATEGORIES),
-              description: `Optional: specific category to search in. Options: ${categoryList}`,
+              enum: ['about', 'preferences'],
+              description: 'Optional: specific file to search',
             },
           },
           required: ['key'],
         },
       },
       {
-        name: 'list_memories',
-        description: `List all facts stored in persistent memory. Can filter by category or show all.
-
-Available categories:
-${categoryDescriptions}`,
+        name: 'add_note',
+        description: `Create or update a note on a specific topic.
+Notes are stored as separate markdown files in the notes/ directory.
+Good for: project notes, ideas, research, anything topic-specific.`,
         input_schema: {
           type: 'object' as const,
           properties: {
-            category: {
+            topic: {
               type: 'string',
-              enum: Object.keys(MEMORY_CATEGORIES),
-              description: `Optional: filter by category. Options: ${categoryList}. If not specified, shows all categories.`,
+              description: 'The topic/title of the note (becomes filename)',
+            },
+            content: {
+              type: 'string',
+              description: 'The note content in markdown',
+            },
+          },
+          required: ['topic', 'content'],
+        },
+      },
+      {
+        name: 'get_note',
+        description: 'Read a specific note by topic.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            topic: {
+              type: 'string',
+              description: 'The topic of the note to retrieve',
+            },
+          },
+          required: ['topic'],
+        },
+      },
+      {
+        name: 'list_notes',
+        description: 'List all notes.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {},
+          required: [],
+        },
+      },
+      {
+        name: 'add_journal_entry',
+        description: `Add a journal entry for today (or a specific date).
+Journal entries are timestamped and appended to the day's file.
+Good for: daily summaries, conversation notes, task tracking.`,
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            content: {
+              type: 'string',
+              description: 'The journal entry content',
+            },
+            date: {
+              type: 'string',
+              description: 'Optional: date in YYYY-MM-DD format. Default: today',
+            },
+          },
+          required: ['content'],
+        },
+      },
+      {
+        name: 'get_journal_entry',
+        description: "Read a journal entry for a specific date (default: today).",
+        input_schema: {
+          type: 'object' as const,
+          properties: {
+            date: {
+              type: 'string',
+              description: 'Date in YYYY-MM-DD format. Default: today',
             },
           },
           required: [],
@@ -425,48 +458,35 @@ ${categoryDescriptions}`,
       },
       {
         name: 'forget',
-        description: 'Remove a fact from persistent memory. Searches all categories unless one is specified.',
+        description: 'Remove a fact from memory.',
         input_schema: {
           type: 'object' as const,
           properties: {
             key: {
               type: 'string',
-              description: 'The key of the memory to forget',
+              description: 'The key to forget',
             },
-            category: {
+            file: {
               type: 'string',
-              enum: Object.keys(MEMORY_CATEGORIES),
-              description: `Optional: specific category to delete from. Options: ${categoryList}`,
+              enum: ['about', 'preferences'],
+              description: 'Optional: specific file to remove from',
             },
           },
           required: ['key'],
         },
       },
       {
-        name: 'move_memory',
-        description: `Move a memory from one category to another. Useful for:
-- Moving tasks from 'todo' to 'today' for daily planning
-- Moving completed items out of 'today'
-- Reorganizing memories between categories`,
+        name: 'delete_note',
+        description: 'Delete a note by topic.',
         input_schema: {
           type: 'object' as const,
           properties: {
-            key: {
+            topic: {
               type: 'string',
-              description: 'The key of the memory to move',
-            },
-            fromCategory: {
-              type: 'string',
-              enum: Object.keys(MEMORY_CATEGORIES),
-              description: `Source category. Options: ${categoryList}`,
-            },
-            toCategory: {
-              type: 'string',
-              enum: Object.keys(MEMORY_CATEGORIES),
-              description: `Target category. Options: ${categoryList}`,
+              description: 'The topic of the note to delete',
             },
           },
-          required: ['key', 'fromCategory', 'toCategory'],
+          required: ['topic'],
         },
       },
     ];

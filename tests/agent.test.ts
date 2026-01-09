@@ -202,48 +202,40 @@ describe('Mode Selector', () => {
     vi.resetModules();
   });
 
-  it('should track user mode state', async () => {
+  it('should track user mode with default simple', async () => {
     const {
-      getUserModeState,
+      getUserMode,
       setUserMode,
-      clearUserMode,
     } = await import('../src/telegram/mode-selector.js');
 
-    // Initially no mode
-    expect(getUserModeState('user1')).toBeNull();
+    // Default mode is 'simple'
+    expect(getUserMode('user1')).toBe('simple');
 
-    // Set mode
+    // Set mode to flow
+    setUserMode('user1', 'flow');
+    expect(getUserMode('user1')).toBe('flow');
+
+    // Set back to simple
     setUserMode('user1', 'simple');
-    const state = getUserModeState('user1');
-    expect(state).not.toBeNull();
-    expect(state?.mode).toBe('simple');
-    expect(state?.awaitingMessage).toBe(true);
-
-    // Clear mode
-    clearUserMode('user1');
-    expect(getUserModeState('user1')).toBeNull();
+    expect(getUserMode('user1')).toBe('simple');
   });
 
-  it('should handle pending messages', async () => {
+  it('should check flow mode correctly', async () => {
     const {
-      setPendingMessage,
-      consumePendingMessage,
-      hasPendingMessage,
+      getUserMode,
+      setUserMode,
+      isFlowMode,
     } = await import('../src/telegram/mode-selector.js');
 
-    // Initially no pending message
-    expect(hasPendingMessage('user1')).toBe(false);
+    // Default is simple, not flow
+    expect(isFlowMode('user2')).toBe(false);
 
-    // Set pending message
-    setPendingMessage('user1', 'Hello');
-    expect(hasPendingMessage('user1')).toBe(true);
+    // Set to flow
+    setUserMode('user2', 'flow');
+    expect(isFlowMode('user2')).toBe(true);
 
-    // Consume pending message
-    const message = consumePendingMessage('user1');
-    expect(message).toBe('Hello');
-    expect(hasPendingMessage('user1')).toBe(false);
-
-    // Consuming again returns null
-    expect(consumePendingMessage('user1')).toBeNull();
+    // Set back to simple
+    setUserMode('user2', 'simple');
+    expect(isFlowMode('user2')).toBe(false);
   });
 });
