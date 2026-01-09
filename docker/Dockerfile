@@ -18,16 +18,12 @@ RUN npm run build
 # Production stage
 FROM node:20-bookworm-slim AS production
 
-# Install tini, build tools, and other dependencies
+# Install tini and build tools (needed for better-sqlite3)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    tini curl git \
+    tini \
     build-essential python3 && \
     rm -rf /var/lib/apt/lists/*
-
-# Install Claude CLI and claude-flow globally
-RUN npm install -g @anthropic-ai/claude-code && \
-    npm install -g claude-flow@alpha || npm install -g claude-flow@latest || true
 
 WORKDIR /app
 

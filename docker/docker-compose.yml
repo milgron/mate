@@ -26,8 +26,6 @@ services:
       - /var/mate:/var/mate
       # Persistent data storage (memory, conversations, notes, logs)
       - ../data:/app/data
-      # Persist Claude CLI auth between rebuilds (entire home for .claude/ and .claude.json)
-      - mate-claude-auth:/home/mate
 
     # Environment variables (loaded from ../.env via env_file)
     environment:
@@ -67,5 +65,3 @@ services:
     environment:
       - NODE_ENV=development
 
-volumes:
-  mate-claude-auth:

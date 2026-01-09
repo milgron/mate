@@ -1,4 +1,4 @@
-# Mate - Hybrid Claude CLI + claude-flow Agent
+# Mate - Anthropic SDK Telegram Agent
 
 ## Pi Connection
 
@@ -18,11 +18,17 @@ SSH:  ssh <your-user>@<your-pi-hostname>
 │  ┌─────────────┐  ┌─────────────────────────────────────┐│
 │  │  Telegram   │  │           Orchestrator              ││
 │  │  Bot API    │  │  ┌───────────┐  ┌───────────────┐   ││
-│  │  (grammy)   │──▶│  │⚡ Simple  │  │ 🔄 Flow       │   ││
-│  │             │  │  │ Claude CLI│  │ claude-flow   │   ││
+│  │  (grammy)   │──▶│  │⚡ Simple  │  │ 🔄 Complex    │   ││
+│  │             │  │  │ Claude API│  │ Extended Think│   ││
 │  │  [Buttons]  │  │  └───────────┘  └───────────────┘   ││
 │  └─────────────┘  └─────────────────────────────────────┘│
-│                                                           │
+│                              │                            │
+│                              ▼                            │
+│                   ┌─────────────────┐                     │
+│                   │  Anthropic SDK  │                     │
+│                   │ @anthropic-ai/sdk│                    │
+│                   └─────────────────┘                     │
+│                              │                            │
 │                   ┌─────────────┐                         │
 │                   │   Docker    │                         │
 │                   │  Container  │                         │
@@ -32,8 +38,8 @@ SSH:  ssh <your-user>@<your-pi-hostname>
 
 ### Routing Modes
 
-- **⚡ Simple**: Uses `claude` CLI for fast, straightforward responses
-- **🔄 Flow**: Uses `claude-flow swarm` for complex multi-step tasks
+- **⚡ Simple**: Direct API call with `claude-sonnet-4-20250514` for fast responses
+- **🔄 Complex**: Extended thinking enabled for multi-step reasoning tasks
 
 User selects mode via Telegram inline keyboard buttons before each message.
 
@@ -43,10 +49,11 @@ User selects mode via Telegram inline keyboard buttons before each message.
 mate/
 ├── src/
 │   ├── index.ts              # Entry point
-│   ├── orchestrator/         # NEW: Routing logic
+│   ├── orchestrator/         # Routing logic
+│   │   ├── client.ts         # Anthropic SDK client singleton
 │   │   ├── router.ts         # Mode selection & routing
-│   │   ├── simple.ts         # Claude CLI wrapper
-│   │   └── complex.ts        # claude-flow wrapper
+│   │   ├── simple.ts         # Simple API wrapper
+│   │   └── complex.ts        # Extended thinking wrapper
 │   ├── telegram/
 │   │   ├── bot.ts            # Grammy client setup
 │   │   ├── handlers.ts       # Message routing + mode selection
@@ -62,7 +69,7 @@ mate/
 │   └── personality.md        # Bot personality config
 ├── tests/
 ├── docker/
-│   ├── Dockerfile            # Debian-based with Claude CLI
+│   ├── Dockerfile            # Debian-based container
 │   └── docker-compose.yml
 └── .env                      # Secrets (never commit)
 ```
@@ -91,11 +98,13 @@ npm run build
 ### First Time Setup on Pi
 
 ```bash
-# After deploying, authenticate Claude CLI inside container:
-docker exec -it mate claude auth login
+# 1. Create .env file with your API key
+echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env
+echo "TELEGRAM_BOT_TOKEN=..." >> .env
+echo "TELEGRAM_ALLOWED_USERS=..." >> .env
 
-# This opens a browser auth flow - complete it
-# Auth is persisted in Docker volume (mate-claude-auth)
+# 2. Deploy and start
+npm run deploy
 ```
 
 ### Deploy to Pi
@@ -160,19 +169,17 @@ journalctl -u mate-updater -f
 | Restart Pi | `npm run deploy:restart` |
 | Pi logs | `npm run deploy:logs` |
 | Pi shell | `ssh <user>@<pi-host> "docker exec -it mate sh"` |
-| Claude auth | `docker exec -it mate claude auth login` |
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | **Yes** | API key from console.anthropic.com |
 | `TELEGRAM_BOT_TOKEN` | Yes | From @BotFather |
 | `TELEGRAM_ALLOWED_USERS` | Yes | Comma-separated user IDs |
 | `GROQ_API_KEY` | No | For voice transcription/TTS |
 | `BOT_NAME` | No | Override personality.md name |
 | `LOG_LEVEL` | No | Default: info |
-
-**Note:** `ANTHROPIC_API_KEY` is no longer required. Authentication is handled via Claude CLI using your Pro/Max account.
 
 ## Security Features
 
@@ -194,21 +201,28 @@ journalctl -u mate-updater -f
 User sends message
         ↓
 [Show mode selection buttons]
-  ⚡ Simple | 🔄 Flow
+  ⚡ Simple | 🔄 Complex
         ↓
 User taps button
         ↓
 [Route to selected executor]
-  - Simple: claude -p "..." --output-format text
-  - Flow: claude-flow swarm "..." --claude --output-format json
+  - Simple: Anthropic SDK messages.create()
+  - Complex: SDK with extended thinking enabled
         ↓
 [Send response to user]
 ```
+
+## API Pricing
+
+Using `claude-sonnet-4-20250514`:
+- Input: $3 / million tokens
+- Output: $15 / million tokens
+
+Extended thinking uses additional tokens for reasoning.
 
 ## Docker Volumes
 
 | Volume | Purpose |
 |--------|---------|
-| `mate-claude-auth` | Persist Claude CLI auth between rebuilds |
 | `/var/mate` | Update trigger file |
 | `../data` | Persistent app data (logs, memory) |
