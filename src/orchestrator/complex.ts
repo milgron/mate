@@ -4,7 +4,8 @@ import { execSimple } from './simple.js';
 import { getConversationDB } from '../db/conversations.js';
 import { loadLongTermMemory, initLongTermMemory, getMemoryDir } from '../db/longterm.js';
 import { getModel, getActiveProvider, supportsThinking, getProviderConfig } from './providers.js';
-import { createMemoryTools } from './tools.js';
+import { createMemoryTools, MemoryTool } from './tools.js';
+import { extractUserInfo, shouldRemember } from '../utils/patterns.js';
 
 export interface ComplexExecOptions {
   timeout?: number;
@@ -22,6 +23,18 @@ const DEFAULT_OPTIONS: Required<ComplexExecOptions> = {
   budgetTokens: 10000, // Extended thinking budget
 };
 
+const MAX_RETRIES = 2;
+
+/**
+ * Check if an error is retryable (e.g., Groq tool call failures).
+ */
+function isRetryableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('Failed to call a function') ||
+         message.includes('tool') ||
+         message.includes('function');
+}
+
 /**
  * Build the system prompt with memory context for complex tasks.
  */
@@ -36,31 +49,23 @@ function buildSystemPrompt(userId: string): string {
   parts.push('');
 
   if (longTermMemory) {
-    parts.push('=== LONG-TERM MEMORY ===');
+    parts.push('=== USER MEMORY ===');
     parts.push(longTermMemory);
     parts.push('');
   }
 
-  parts.push('=== MEMORY TOOLS ===');
-  parts.push('You MUST use the available tools to persist user information.');
+  parts.push('=== TOOLS ===');
+  parts.push('You have 2 tools available:');
+  parts.push('1. remember(key, value) - Save user info. Use when user shares name, location, work, preferences.');
+  parts.push('2. recall(key) - Get saved info.');
   parts.push('');
-  parts.push('Available tools:');
-  parts.push('- remember(key, value, file): Save facts to persistent memory');
-  parts.push('- recall(key, file): Retrieve stored info from memory');
-  parts.push('');
-  parts.push('CRITICAL: When a user shares personal information (name, location, preferences),');
-  parts.push('you MUST call the remember tool BEFORE responding with text.');
-  parts.push('');
-  parts.push('Examples of when to use remember:');
-  parts.push('- "Me llamo Juan" → CALL remember(key="Name", value="Juan", file="about")');
-  parts.push('- "Vivo en Madrid" → CALL remember(key="Location", value="Madrid", file="about")');
-  parts.push('- "Prefiero respuestas cortas" → CALL remember(key="Response style", value="short", file="preferences")');
+  parts.push('When user shares personal info, call remember FIRST, then respond.');
+  parts.push('Example: "me llamo Juan" -> remember(key="name", value="Juan")');
   parts.push('');
   parts.push('=== INSTRUCTIONS ===');
-  parts.push(`- Memory files are stored in ${memoryDir}/`);
-  parts.push('- Respond in the same language as the user');
-  parts.push('- For complex tasks, break down your approach step by step');
-  parts.push('- Provide comprehensive and detailed responses');
+  parts.push(`Memory location: ${memoryDir}/`);
+  parts.push('Respond in the same language as the user.');
+  parts.push('For complex tasks, break down your approach step by step.');
 
   return parts.join('\n');
 }
@@ -98,7 +103,7 @@ function buildMessages(
 /**
  * Execute a complex task using the Vercel AI SDK.
  * Uses extended thinking for Anthropic, standard generation for other providers.
- * This handles multi-step tasks, research, analysis, etc.
+ * Includes retry logic for intermittent tool call failures.
  */
 export async function execComplex(
   task: string,
@@ -124,56 +129,105 @@ export async function execComplex(
   });
 
   const db = getConversationDB();
+  const systemPrompt = buildSystemPrompt(userId);
+  const messages = buildMessages(userId, task, opts.historyLimit);
+  const tools = createMemoryTools(userId);
 
-  try {
-    const systemPrompt = buildSystemPrompt(userId);
-    const messages = buildMessages(userId, task, opts.historyLimit);
-    const tools = createMemoryTools(userId);
+  let lastError: Error | null = null;
 
-    // Build generation options
-    // Extended thinking is only available for Anthropic
-    const generateOptions: Parameters<typeof generateText>[0] = {
-      model,
-      system: systemPrompt,
-      messages,
-      maxOutputTokens: opts.maxTokens,
-      tools,
-      toolChoice: 'auto',
-      stopWhen: stepCountIs(10),
-    };
+  // Retry loop for intermittent Groq tool call failures
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      if (attempt > 0) {
+        logger.warn('Retrying after tool call error', { attempt, provider });
+      }
 
-    // Add extended thinking for Anthropic
-    if (supportsThinking(provider)) {
-      // @ts-expect-error - experimental_thinking is Anthropic-specific
-      generateOptions.experimental_thinking = {
-        enabled: true,
-        budgetTokens: opts.budgetTokens,
+      // Build generation options
+      const generateOptions: Parameters<typeof generateText>[0] = {
+        model,
+        system: systemPrompt,
+        messages,
+        maxOutputTokens: opts.maxTokens,
+        tools,
+        toolChoice: 'auto',
+        stopWhen: stepCountIs(10),
       };
+
+      // Add extended thinking for Anthropic
+      if (supportsThinking(provider)) {
+        // @ts-expect-error - experimental_thinking is Anthropic-specific
+        generateOptions.experimental_thinking = {
+          enabled: true,
+          budgetTokens: opts.budgetTokens,
+        };
+      }
+
+      const result = await generateText(generateOptions);
+      const { text, usage, steps, toolCalls } = result;
+
+      logger.info('Complex task completed', {
+        responseLength: text.length,
+        inputTokens: usage?.inputTokens,
+        outputTokens: usage?.outputTokens,
+        provider,
+        stepsCount: steps?.length || 0,
+        toolCallsCount: toolCalls?.length || 0,
+        attempt,
+      });
+
+      // Fallback: If no tools were called but the message looks like it should remember something
+      if ((toolCalls?.length || 0) === 0 && shouldRemember(task)) {
+        const extracted = extractUserInfo(task);
+        if (extracted) {
+          logger.info('Fallback pattern matching triggered', {
+            key: extracted.key,
+            value: extracted.value,
+            file: extracted.file,
+          });
+
+          const memoryTool = new MemoryTool();
+          memoryTool.setUser(userId);
+          await memoryTool.remember({
+            key: extracted.key,
+            value: extracted.value,
+            file: extracted.file,
+          });
+        }
+      }
+
+      // Save both messages to history
+      db.addMessage(userId, 'user', task);
+      db.addMessage(userId, 'assistant', text);
+
+      return text;
+    } catch (error: unknown) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Only retry if it's a retryable error and we have retries left
+      if (attempt < MAX_RETRIES && isRetryableError(error)) {
+        logger.warn('Tool call error, will retry', {
+          error: lastError.message,
+          attempt,
+          provider,
+        });
+        continue;
+      }
+
+      // Log error
+      logger.error('AI SDK complex execution failed', {
+        error: lastError.message,
+        provider,
+        attempt,
+      });
+      break;
     }
-
-    const { text, usage } = await generateText(generateOptions);
-
-    logger.info('Complex task completed', {
-      responseLength: text.length,
-      inputTokens: usage?.inputTokens,
-      outputTokens: usage?.outputTokens,
-      provider,
-    });
-
-    // Save both messages to history
-    db.addMessage(userId, 'user', task);
-    db.addMessage(userId, 'assistant', text);
-
-    return text;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error('AI SDK complex execution failed', { error: errorMessage, provider });
-
-    if (opts.fallbackToSimple) {
-      logger.info('Falling back to simple execution');
-      return execSimple(task, userId);
-    }
-
-    throw new Error('An error occurred processing your request.');
   }
+
+  // Fallback to simple execution if enabled
+  if (opts.fallbackToSimple) {
+    logger.info('Falling back to simple execution');
+    return execSimple(task, userId);
+  }
+
+  throw new Error('An error occurred processing your request.');
 }

@@ -3,7 +3,8 @@ import { logger } from '../utils/logger.js';
 import { getConversationDB } from '../db/conversations.js';
 import { loadLongTermMemory, initLongTermMemory, getMemoryDir } from '../db/longterm.js';
 import { getModel, getActiveProvider } from './providers.js';
-import { createMemoryTools } from './tools.js';
+import { createMemoryTools, MemoryTool } from './tools.js';
+import { extractUserInfo, shouldRemember } from '../utils/patterns.js';
 
 export interface SimpleExecOptions {
   timeout?: number;
@@ -17,6 +18,18 @@ const DEFAULT_OPTIONS: Required<SimpleExecOptions> = {
   historyLimit: 30, // Last 30 messages
 };
 
+const MAX_RETRIES = 2;
+
+/**
+ * Check if an error is retryable (e.g., Groq tool call failures).
+ */
+function isRetryableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('Failed to call a function') ||
+         message.includes('tool') ||
+         message.includes('function');
+}
+
 /**
  * Build the system prompt with memory context.
  */
@@ -27,29 +40,22 @@ function buildSystemPrompt(userId: string): string {
   const parts: string[] = [];
 
   if (longTermMemory) {
-    parts.push('=== LONG-TERM MEMORY ===');
+    parts.push('=== USER MEMORY ===');
     parts.push(longTermMemory);
     parts.push('');
   }
 
-  parts.push('=== MEMORY TOOLS ===');
-  parts.push('You MUST use the available tools to persist user information.');
+  parts.push('=== TOOLS ===');
+  parts.push('You have 2 tools available:');
+  parts.push('1. remember(key, value) - Save user info. Use when user shares name, location, work, preferences.');
+  parts.push('2. recall(key) - Get saved info.');
   parts.push('');
-  parts.push('Available tools:');
-  parts.push('- remember(key, value, file): Save facts to persistent memory');
-  parts.push('- recall(key, file): Retrieve stored info from memory');
-  parts.push('');
-  parts.push('CRITICAL: When a user shares personal information (name, location, preferences),');
-  parts.push('you MUST call the remember tool BEFORE responding with text.');
-  parts.push('');
-  parts.push('Examples of when to use remember:');
-  parts.push('- "Me llamo Juan" → CALL remember(key="Name", value="Juan", file="about")');
-  parts.push('- "Vivo en Madrid" → CALL remember(key="Location", value="Madrid", file="about")');
-  parts.push('- "Prefiero respuestas cortas" → CALL remember(key="Response style", value="short", file="preferences")');
+  parts.push('When user shares personal info, call remember FIRST, then respond.');
+  parts.push('Example: "me llamo Juan" -> remember(key="name", value="Juan")');
   parts.push('');
   parts.push('=== INSTRUCTIONS ===');
-  parts.push(`- Memory files are stored in ${memoryDir}/`);
-  parts.push('- Respond in the same language as the user');
+  parts.push(`Memory location: ${memoryDir}/`);
+  parts.push('Respond in the same language as the user.');
 
   return parts.join('\n');
 }
@@ -86,7 +92,8 @@ function buildMessages(
 
 /**
  * Execute a simple prompt using the Vercel AI SDK.
- * This is fast and suitable for straightforward questions/tasks.
+ * Includes retry logic for intermittent tool call failures.
+ * Falls back to pattern matching if tools aren't called.
  */
 export async function execSimple(
   prompt: string,
@@ -108,50 +115,92 @@ export async function execSimple(
   });
 
   const db = getConversationDB();
+  const systemPrompt = buildSystemPrompt(userId);
+  const messages = buildMessages(userId, prompt, opts.historyLimit);
+  const tools = createMemoryTools(userId);
 
-  try {
-    const systemPrompt = buildSystemPrompt(userId);
-    const messages = buildMessages(userId, prompt, opts.historyLimit);
-    const tools = createMemoryTools(userId);
+  let lastError: Error | null = null;
 
-    logger.debug('Tools available', {
-      toolNames: Object.keys(tools),
-      toolCount: Object.keys(tools).length,
-    });
+  // Retry loop for intermittent Groq tool call failures
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      if (attempt > 0) {
+        logger.warn('Retrying after tool call error', { attempt, provider });
+      }
 
-    const result = await generateText({
-      model,
-      system: systemPrompt,
-      messages,
-      maxOutputTokens: opts.maxTokens,
-      tools,
-      toolChoice: 'auto',
-      stopWhen: stepCountIs(5),
-    });
+      const result = await generateText({
+        model,
+        system: systemPrompt,
+        messages,
+        maxOutputTokens: opts.maxTokens,
+        tools,
+        toolChoice: 'auto',
+        stopWhen: stepCountIs(5),
+      });
 
-    const { text, usage, steps, toolCalls } = result;
+      const { text, usage, steps, toolCalls } = result;
 
-    logger.info('Simple prompt completed', {
-      responseLength: text.length,
-      inputTokens: usage?.inputTokens,
-      outputTokens: usage?.outputTokens,
-      provider,
-      stepsCount: steps?.length || 0,
-      toolCallsCount: toolCalls?.length || 0,
-      toolCallNames: toolCalls?.map(tc => tc.toolName) || [],
-    });
+      logger.info('Simple prompt completed', {
+        responseLength: text.length,
+        inputTokens: usage?.inputTokens,
+        outputTokens: usage?.outputTokens,
+        provider,
+        stepsCount: steps?.length || 0,
+        toolCallsCount: toolCalls?.length || 0,
+        toolCallNames: toolCalls?.map(tc => tc.toolName) || [],
+        attempt,
+      });
 
-    // Save both messages to history
-    db.addMessage(userId, 'user', prompt);
-    db.addMessage(userId, 'assistant', text);
+      // Fallback: If no tools were called but the message looks like it should remember something
+      if ((toolCalls?.length || 0) === 0 && shouldRemember(prompt)) {
+        const extracted = extractUserInfo(prompt);
+        if (extracted) {
+          logger.info('Fallback pattern matching triggered', {
+            key: extracted.key,
+            value: extracted.value,
+            file: extracted.file,
+          });
 
-    return text;
-  } catch (error: unknown) {
-    const err = error as { message?: string };
-    logger.error('AI SDK execution failed', {
-      error: err.message,
-      provider,
-    });
-    throw new Error('An error occurred processing your request.');
+          // Use MemoryTool directly for fallback
+          const memoryTool = new MemoryTool();
+          memoryTool.setUser(userId);
+          await memoryTool.remember({
+            key: extracted.key,
+            value: extracted.value,
+            file: extracted.file,
+          });
+        }
+      }
+
+      // Save both messages to history
+      db.addMessage(userId, 'user', prompt);
+      db.addMessage(userId, 'assistant', text);
+
+      return text;
+    } catch (error: unknown) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Only retry if it's a retryable error and we have retries left
+      if (attempt < MAX_RETRIES && isRetryableError(error)) {
+        logger.warn('Tool call error, will retry', {
+          error: lastError.message,
+          attempt,
+          provider,
+        });
+        continue;
+      }
+
+      // Log and throw on final attempt or non-retryable error
+      logger.error('AI SDK execution failed', {
+        error: lastError.message,
+        provider,
+        attempt,
+        willRetry: false,
+      });
+      break;
+    }
   }
+
+  // If we get here, all retries failed
+  throw new Error('An error occurred processing your request.');
 }
