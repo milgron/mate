@@ -1,7 +1,7 @@
 import { generateText, stepCountIs } from 'ai';
 import { logger } from '../utils/logger.js';
 import { getConversationDB } from '../db/conversations.js';
-import { loadLongTermMemory, initLongTermMemory, getMemoryDir } from '../db/longterm.js';
+import { getSemanticDB } from '../db/semantic.js';
 import { getModel, getActiveProvider } from './providers.js';
 import { createMemoryTools, MemoryTool } from './tools.js';
 import { extractUserInfo, shouldRemember } from '../utils/patterns.js';
@@ -31,30 +31,44 @@ function isRetryableError(error: unknown): boolean {
 }
 
 /**
- * Build the system prompt with memory context.
+ * Build the system prompt with memory context from LanceDB.
  */
-function buildSystemPrompt(userId: string): string {
-  const longTermMemory = loadLongTermMemory(userId);
-  const memoryDir = getMemoryDir(userId);
-
+async function buildSystemPrompt(userId: string): Promise<string> {
   const parts: string[] = [];
 
-  if (longTermMemory) {
-    parts.push('=== USER MEMORY ===');
-    parts.push(longTermMemory);
-    parts.push('');
+  try {
+    const db = await getSemanticDB();
+    const allMemories = await db.getAllForUser(userId);
+
+    if (allMemories.length > 0) {
+      const facts = allMemories.filter(m => m.type === 'fact');
+      const prefs = allMemories.filter(m => m.type === 'preference');
+
+      if (facts.length > 0) {
+        parts.push('=== USER INFO ===');
+        facts.forEach(f => parts.push(`- ${f.key}: ${f.content}`));
+        parts.push('');
+      }
+
+      if (prefs.length > 0) {
+        parts.push('=== PREFERENCES ===');
+        prefs.forEach(p => parts.push(`- ${p.key}: ${p.content}`));
+        parts.push('');
+      }
+    }
+  } catch (error) {
+    logger.error('Failed to load memories for system prompt', { error, userId });
   }
 
   parts.push('=== TOOLS ===');
   parts.push('You have 2 tools available:');
   parts.push('1. remember(key, value) - Save user info. Use when user shares name, location, work, preferences.');
-  parts.push('2. recall(key) - Get saved info.');
+  parts.push('2. recall(query) - Search memories semantically.');
   parts.push('');
   parts.push('When user shares personal info, call remember FIRST, then respond.');
   parts.push('Example: "me llamo Juan" -> remember(key="name", value="Juan")');
   parts.push('');
   parts.push('=== INSTRUCTIONS ===');
-  parts.push(`Memory location: ${memoryDir}/`);
   parts.push('Respond in the same language as the user.');
 
   return parts.join('\n');
@@ -102,9 +116,6 @@ export async function execSimple(
 ): Promise<string> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
 
-  // Initialize long-term memory file if it doesn't exist
-  initLongTermMemory(userId);
-
   const provider = getActiveProvider();
   const model = getModel();
 
@@ -115,7 +126,7 @@ export async function execSimple(
   });
 
   const db = getConversationDB();
-  const systemPrompt = buildSystemPrompt(userId);
+  const systemPrompt = await buildSystemPrompt(userId);
   const messages = buildMessages(userId, prompt, opts.historyLimit);
   const tools = createMemoryTools(userId);
 

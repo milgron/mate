@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-01-10
+
+### Added
+- **Semantic memory** with LanceDB vector database
+  - Local embeddings using Transformers.js (all-MiniLM-L6-v2, 384 dimensions)
+  - Semantic search for memories (no exact key match required)
+  - Memories automatically loaded into system prompt
+- New `src/services/embeddings.ts` for local embedding generation
+- New `src/db/semantic.ts` for LanceDB vector storage
+
+### Changed
+- Memory tools now use LanceDB instead of markdown files
+- `buildSystemPrompt` is now async, loads memories from vector DB
+- Recall tool uses semantic search instead of exact key matching
+
+### Fixed
+- Groq tool calling reliability (memories in system prompt bypass tool issues)
+
 ## [0.2.0] - 2026-01-10
 
 ### Added

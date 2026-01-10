@@ -39,7 +39,7 @@ Personal AI assistant running on Raspberry Pi, powered by multiple LLM providers
 - **User whitelist**: Only authorized Telegram users can interact
 - **Rate limiting**: Token bucket per user to prevent abuse
 - **Conversation memory**: SQLite-based context per user session
-- **Long-term memory**: Human-readable markdown files (File over App philosophy)
+- **Semantic memory**: Vector-based long-term memory with LanceDB and local embeddings
 - **Blog integration**: Optional Collected Notes API for publishing
 
 ## Web Dashboard
@@ -84,47 +84,37 @@ AI_MODEL=gpt-4-turbo
 
 ## Memory System
 
-Mate uses a **File over App** philosophy for long-term memory: files are human-readable markdown that outlive the application.
+Mate uses **semantic memory** powered by LanceDB (vector database) and local embeddings via Transformers.js.
 
-### Structure
+### How It Works
+
+1. When you share information ("me llamo Juan"), it's converted to a 384-dimensional vector using all-MiniLM-L6-v2
+2. The vector is stored in LanceDB with metadata (key, content, type)
+3. Memories are automatically loaded into the system prompt
+4. Recall uses semantic search—no exact key match required
+
+### Storage
 
 ```
-data/memory/{userId}/
-├── about.md           # User identity (name, location, work)
-├── preferences.md     # User preferences (language, tone)
-├── notes/             # Topic-specific notes
-│   └── {topic}.md
-└── journal/           # Daily entries
-    └── {YYYY-MM-DD}.md
+data/semantic-memory/      # LanceDB vector database
+├── memories.lance/        # Vector table with user memories
+└── ...
 ```
 
-### Example: about.md
+### Memory Types
 
-```markdown
-# About
-
-## Identity
-- **Name**: Juan
-- **Location**: Buenos Aires
-- **Timezone**: America/Argentina/Buenos_Aires
-
-## Work
-- **Role**: Software Engineer
-- **Company**: Acme Corp
-
-## Context
-Working on a personal AI assistant project.
-
----
-*Last updated: 2026-01-09*
-```
+| Type | Description | Examples |
+|------|-------------|----------|
+| `fact` | User identity info | Name, location, work |
+| `preference` | User preferences | Language, tone, style |
+| `note` | General notes | Topics, context |
 
 ### Benefits
 
-- **Portable**: Open in Obsidian, VS Code, any text editor
-- **Versionable**: Git-friendly, clear diffs
-- **Editable**: Manually adjust memories if needed
-- **Future-proof**: Still readable in 2060 without special software
+- **Semantic search**: "¿cómo me llamo?" finds "Name: Juan" even without exact match
+- **No external APIs**: Embeddings run locally (~50-150ms per text)
+- **Scalable**: Handles thousands of memories efficiently
+- **Automatic context**: Memories loaded into every prompt
 
 ## Setup
 
@@ -240,7 +230,10 @@ mate/
 │   │   └── middleware.ts     # Auth + rate limiting
 │   ├── db/
 │   │   ├── conversations.ts  # SQLite conversation history
-│   │   └── longterm.ts       # Markdown memory manager
+│   │   ├── longterm.ts       # Legacy markdown memory (deprecated)
+│   │   └── semantic.ts       # LanceDB vector memory
+│   ├── services/
+│   │   └── embeddings.ts     # Local embeddings (Transformers.js)
 │   ├── agent/
 │   │   ├── memory.ts         # Conversation memory class
 │   │   └── tools/            # Available tools

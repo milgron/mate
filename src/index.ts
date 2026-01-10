@@ -21,6 +21,8 @@ import { logger } from './utils/logger.js';
 import { loadPersonality } from './agent/personality.js';
 import { routeMessage, type RoutingMode } from './orchestrator/index.js';
 import { setUserMode, getUserMode } from './telegram/mode-selector.js';
+import { initEmbeddings } from './services/embeddings.js';
+import { getSemanticDB } from './db/semantic.js';
 
 // Track bot start time for uptime calculation
 const botStartTime = Date.now();
@@ -49,6 +51,17 @@ if (!config.allowedUsers) {
 
 async function main() {
   logger.info(`Starting ${config.botName}...`);
+
+  // Initialize semantic memory (embeddings model + LanceDB)
+  logger.info('Initializing semantic memory system...');
+  try {
+    await initEmbeddings();
+    await getSemanticDB();
+    logger.info('Semantic memory initialized successfully');
+  } catch (err) {
+    logger.error('Failed to initialize semantic memory', { error: String(err) });
+    // Continue anyway - memory features will fail gracefully
+  }
 
   // Initialize security
   const whitelist = UserWhitelist.fromString(config.allowedUsers);
