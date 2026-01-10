@@ -36,6 +36,7 @@ services:
       - NODE_ENV=production
       - WEB_HOST=mate.local:3000
       - DATA_DIR=/app/data
+      - HOSTNAME=0.0.0.0
 
     # Resource limits (optimized for Pi 5 8GB)
     deploy:
