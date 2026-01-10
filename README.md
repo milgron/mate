@@ -42,6 +42,19 @@ Personal AI assistant running on Raspberry Pi, powered by multiple LLM providers
 - **Long-term memory**: Human-readable markdown files (File over App philosophy)
 - **Blog integration**: Optional Collected Notes API for publishing
 
+## Web Dashboard
+
+Mate includes a web interface for configuration and monitoring:
+
+| Route | Description |
+|-------|-------------|
+| `mate.local:3000/config` | Configure AI models, assistant name, voice settings |
+| `mate.local:3000/use` | View usage statistics and cost breakdown |
+
+Changes are saved to `data/config.json` and take effect immediately—no container restart needed.
+
+On startup, the bot sends a Telegram notification with links to both pages.
+
 ## AI Providers
 
 Mate uses the Vercel AI SDK to support multiple LLM providers. You can switch between them via the `AI_PROVIDER` environment variable.
@@ -213,7 +226,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and [CONTRIBUTING.md](CONTR
 
 ```
 mate/
-├── src/
+├── src/                      # Telegram bot (Node.js)
 │   ├── index.ts              # Entry point
 │   ├── orchestrator/         # Message routing
 │   │   ├── providers.ts      # Multi-provider AI configuration
@@ -235,13 +248,21 @@ mate/
 │   └── security/
 │       ├── whitelist.ts      # User authorization
 │       └── rate-limit.ts     # Token bucket limiter
+├── web/                      # Web dashboard (Next.js 15)
+│   ├── src/app/
+│   │   ├── config/           # Configuration page
+│   │   ├── use/              # Usage dashboard
+│   │   └── api/              # API routes
+│   └── src/components/       # React components
 ├── docker/
-│   ├── Dockerfile            # Production image
+│   ├── Dockerfile            # Production image (bot + web)
 │   └── docker-compose.yml
 ├── scripts/
 │   ├── deploy.sh             # Manual deploy script
 │   └── mate-updater.service  # Systemd auto-updater
 ├── data/                     # Runtime data (not in git)
+│   ├── config.json           # Web-editable configuration
+│   ├── usage.json            # Usage statistics
 │   └── memory/{userId}/      # User memory files
 ├── CHANGELOG.md              # Version history
 ├── CONTRIBUTING.md           # Development guide

@@ -7,10 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-01-10
+
 ### Added
+- **Web dashboard** at mate.local:3000
+  - `/config` - Configure AI models, assistant name, voice settings
+  - `/use` - Usage statistics and cost breakdown
+- **Multi-provider support** via Vercel AI SDK (Anthropic, OpenAI, Groq)
+- Hot-swap models from web UI without container restart
+- Startup notification via Telegram with config/usage links
 - Human-readable memory system (File over App philosophy)
 - Multi-file memory structure: about.md, preferences.md, notes/, journal/
 - Memory migration from legacy formats
+
+### Changed
+- Migrated from @anthropic-ai/sdk to Vercel AI SDK
+- Config now stored in data/config.json (web-editable)
+
+### Fixed
+- Docker hostname resolution for Next.js standalone
 
 ## [0.1.0] - 2026-01-04
 
