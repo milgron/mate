@@ -1,8 +1,12 @@
-import { pipeline, type FeatureExtractionPipeline } from '@huggingface/transformers';
+import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers';
 import { logger } from '../utils/logger.js';
 
 let embedder: FeatureExtractionPipeline | null = null;
 let initPromise: Promise<void> | null = null;
+
+// Configure cache directory to a writable location (not node_modules)
+const dataDir = process.env.DATA_DIR || './data';
+env.cacheDir = `${dataDir}/models`;
 
 /**
  * Initialize the embedding model.
@@ -19,7 +23,7 @@ export async function initEmbeddings(): Promise<void> {
   }
 
   initPromise = (async () => {
-    logger.info('Loading embedding model (all-MiniLM-L6-v2)...');
+    logger.info('Loading embedding model (all-MiniLM-L6-v2)...', { cacheDir: env.cacheDir });
     const startTime = Date.now();
 
     embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
