@@ -8,6 +8,10 @@ services:
     env_file:
       - ../.env
 
+    # Web app port
+    ports:
+      - "3000:3000"
+
     # Security hardening
     user: "1001:1001"
     read_only: true
@@ -30,6 +34,8 @@ services:
     # Environment variables (loaded from ../.env via env_file)
     environment:
       - NODE_ENV=production
+      - WEB_HOST=mate.local:3000
+      - DATA_DIR=/app/data
 
     # Resource limits (optimized for Pi 5 8GB)
     deploy:

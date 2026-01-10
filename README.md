@@ -1,6 +1,6 @@
 # Mate
 
-Personal AI assistant running on Raspberry Pi, powered by the Anthropic SDK and accessible via Telegram.
+Personal AI assistant running on Raspberry Pi, powered by multiple LLM providers (Anthropic, OpenAI, Groq) via the Vercel AI SDK and accessible via Telegram.
 
 ## Architecture
 
@@ -9,13 +9,16 @@ Personal AI assistant running on Raspberry Pi, powered by the Anthropic SDK and 
 │              Raspberry Pi (<your-pi>)                   │
 │                                                         │
 │  ┌──────────┐    ┌─────────────┐    ┌───────────────┐  │
-│  │ Telegram │───▶│ Orchestrator│───▶│ Anthropic SDK │  │
-│  │   Bot    │    │   Router    │    │  claude-sonnet│  │
-│  │ (grammy) │    │             │    ├───────────────┤  │
-│  └──────────┘    │ ⚡ Simple   │    │   Extended    │  │
-│                  │ 🔄 Complex  │───▶│   Thinking    │  │
-│                  └─────────────┘    └───────────────┘  │
-│                                                         │
+│  │ Telegram │───▶│ Orchestrator│───▶│ Vercel AI SDK │  │
+│  │   Bot    │    │   Router    │    └───────┬───────┘  │
+│  │ (grammy) │    │             │            │          │
+│  └──────────┘    │ ⚡ Simple   │    ┌───────┴───────┐  │
+│                  │ 🔄 Complex  │    │   Providers   │  │
+│                  └─────────────┘    ├───────────────┤  │
+│                                     │ • Anthropic   │  │
+│                                     │ • OpenAI      │  │
+│                                     │ • Groq        │  │
+│                                     └───────────────┘  │
 │                    Docker Container                     │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -30,13 +33,41 @@ Personal AI assistant running on Raspberry Pi, powered by the Anthropic SDK and 
 
 ## Features
 
-- **Dual-mode processing**: Simple queries vs complex tasks with extended thinking
+- **Multi-provider AI**: Supports Anthropic (Claude), OpenAI (GPT-4), and Groq (Llama) via Vercel AI SDK
+- **Dual-mode processing**: Simple queries vs complex tasks with extended thinking (Anthropic only)
 - **Voice support**: Send voice messages (transcribed via Groq), receive TTS responses
 - **User whitelist**: Only authorized Telegram users can interact
 - **Rate limiting**: Token bucket per user to prevent abuse
 - **Conversation memory**: SQLite-based context per user session
 - **Long-term memory**: Human-readable markdown files (File over App philosophy)
 - **Blog integration**: Optional Collected Notes API for publishing
+
+## AI Providers
+
+Mate uses the Vercel AI SDK to support multiple LLM providers. You can switch between them via the `AI_PROVIDER` environment variable.
+
+| Provider | Models | Extended Thinking |
+|----------|--------|-------------------|
+| **Anthropic** | claude-sonnet-4-20250514 (default) | ✅ Yes |
+| **OpenAI** | gpt-4o (default) | ❌ No |
+| **Groq** | llama-3.3-70b-versatile (default) | ❌ No |
+
+To use a different provider:
+
+```bash
+# Use OpenAI
+AI_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+
+# Use Groq (fast and free tier available)
+AI_PROVIDER=groq
+GROQ_API_KEY=gsk_...
+
+# Override the default model
+AI_MODEL=gpt-4-turbo
+```
+
+**Note:** Extended thinking (deep reasoning for complex tasks) is only available with Anthropic Claude models. Other providers will use standard generation for complex tasks.
 
 ## Memory System
 
@@ -185,7 +216,7 @@ mate/
 ├── src/
 │   ├── index.ts              # Entry point
 │   ├── orchestrator/         # Message routing
-│   │   ├── client.ts         # Anthropic SDK client
+│   │   ├── providers.ts      # Multi-provider AI configuration
 │   │   ├── router.ts         # Mode suggestion logic
 │   │   ├── simple.ts         # Direct API wrapper
 │   │   └── complex.ts        # Extended thinking wrapper
@@ -221,10 +252,13 @@ mate/
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | **Yes** | API key from console.anthropic.com |
+| `AI_PROVIDER` | No | AI provider: `anthropic`, `openai`, or `groq` (default: anthropic) |
+| `ANTHROPIC_API_KEY` | If using Anthropic | API key from console.anthropic.com |
+| `OPENAI_API_KEY` | If using OpenAI | API key from platform.openai.com |
+| `GROQ_API_KEY` | For voice or Groq AI | API key from console.groq.com |
+| `AI_MODEL` | No | Override the default model for the active provider |
 | `TELEGRAM_BOT_TOKEN` | Yes | From @BotFather |
 | `TELEGRAM_ALLOWED_USERS` | Yes | Comma-separated user IDs |
-| `GROQ_API_KEY` | No | For voice transcription/TTS |
 | `LOG_LEVEL` | No | `debug`, `info`, `warn`, `error` |
 | `COLLECTED_NOTES_API_KEY` | No | For blog integration |
 | `COLLECTED_NOTES_SITE_PATH` | No | Blog site path |
@@ -238,11 +272,15 @@ mate/
 
 ## API Pricing
 
-Using `claude-sonnet-4-20250514`:
-- Input: $3 / million tokens
-- Output: $15 / million tokens
+Pricing varies by provider. Here are approximate costs per million tokens:
 
-Extended thinking mode uses additional tokens for reasoning.
+| Provider | Model | Input | Output |
+|----------|-------|-------|--------|
+| Anthropic | claude-sonnet-4 | $3 | $15 |
+| OpenAI | gpt-4o | $2.50 | $10 |
+| Groq | llama-3.3-70b | $0.59 | $0.79 |
+
+Extended thinking mode (Anthropic only) uses additional tokens for reasoning.
 
 ## License
 

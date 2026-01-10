@@ -1,7 +1,8 @@
+import { generateText } from 'ai';
 import { logger } from '../utils/logger.js';
 import { getConversationDB } from '../db/conversations.js';
 import { loadLongTermMemory, initLongTermMemory, getMemoryDir } from '../db/longterm.js';
-import { getClient, DEFAULT_MODEL } from './client.js';
+import { getModel, getActiveProvider } from './providers.js';
 
 export interface SimpleExecOptions {
   timeout?: number;
@@ -73,7 +74,7 @@ function buildMessages(
 }
 
 /**
- * Execute a simple prompt using the Anthropic SDK.
+ * Execute a simple prompt using the Vercel AI SDK.
  * This is fast and suitable for straightforward questions/tasks.
  */
 export async function execSimple(
@@ -86,46 +87,45 @@ export async function execSimple(
   // Initialize long-term memory file if it doesn't exist
   initLongTermMemory(userId);
 
-  logger.info('Executing simple prompt via Anthropic SDK', {
+  const provider = getActiveProvider();
+  const model = getModel();
+
+  logger.info('Executing simple prompt via Vercel AI SDK', {
     promptLength: prompt.length,
     timeout: opts.timeout,
-    model: DEFAULT_MODEL,
+    provider,
   });
 
   const db = getConversationDB();
-  const client = getClient();
 
   try {
     const systemPrompt = buildSystemPrompt(userId);
     const messages = buildMessages(userId, prompt, opts.historyLimit);
 
-    const response = await client.messages.create({
-      model: DEFAULT_MODEL,
-      max_tokens: opts.maxTokens,
+    const { text, usage } = await generateText({
+      model,
       system: systemPrompt,
       messages,
+      maxOutputTokens: opts.maxTokens,
     });
 
-    // Extract text from response
-    const textContent = response.content.find((block) => block.type === 'text');
-    const result = textContent?.type === 'text' ? textContent.text : '';
-
     logger.info('Simple prompt completed', {
-      responseLength: result.length,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+      responseLength: text.length,
+      inputTokens: usage?.inputTokens,
+      outputTokens: usage?.outputTokens,
+      provider,
     });
 
     // Save both messages to history
     db.addMessage(userId, 'user', prompt);
-    db.addMessage(userId, 'assistant', result);
+    db.addMessage(userId, 'assistant', text);
 
-    return result;
+    return text;
   } catch (error: unknown) {
-    const err = error as { message?: string; status?: number };
-    logger.error('Anthropic SDK execution failed', {
+    const err = error as { message?: string };
+    logger.error('AI SDK execution failed', {
       error: err.message,
-      status: err.status,
+      provider,
     });
     throw new Error('An error occurred processing your request.');
   }

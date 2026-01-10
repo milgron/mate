@@ -377,7 +377,18 @@ async function main() {
   logger.info(`${config.botName} is running!`);
 
   // Notify all whitelisted users that bot is ready
-  const startupMessage = `🤖 ${config.botName} is online!\n\n⚡ Simple mode (default)\n\nUse /flow for complex tasks`;
+  const webHost = process.env.WEB_HOST || 'mate.local:3000';
+  const startupMessage = [
+    `🤖 ${config.botName} is online!`,
+    '',
+    '⚡ Simple mode (default)',
+    '',
+    'Commands: /flow, /simple, /status',
+    '',
+    `⚙️ Configure: http://${webHost}/config`,
+    `📊 Usage: http://${webHost}/use`,
+  ].join('\n');
+
   for (const userId of whitelist.getAllUserIds()) {
     try {
       await bot.api.sendMessage(userId, startupMessage);

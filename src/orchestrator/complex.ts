@@ -1,8 +1,9 @@
+import { generateText } from 'ai';
 import { logger } from '../utils/logger.js';
 import { execSimple } from './simple.js';
 import { getConversationDB } from '../db/conversations.js';
 import { loadLongTermMemory, initLongTermMemory, getMemoryDir } from '../db/longterm.js';
-import { getClient, COMPLEX_MODEL } from './client.js';
+import { getModel, getActiveProvider, supportsThinking, getProviderConfig } from './providers.js';
 
 export interface ComplexExecOptions {
   timeout?: number;
@@ -84,7 +85,8 @@ function buildMessages(
 }
 
 /**
- * Execute a complex task using the Anthropic SDK with extended thinking.
+ * Execute a complex task using the Vercel AI SDK.
+ * Uses extended thinking for Anthropic, standard generation for other providers.
  * This handles multi-step tasks, research, analysis, etc.
  */
 export async function execComplex(
@@ -97,52 +99,60 @@ export async function execComplex(
   // Initialize long-term memory file if it doesn't exist
   initLongTermMemory(userId);
 
-  logger.info('Executing complex task via Anthropic SDK', {
+  const provider = getActiveProvider();
+  const config = getProviderConfig(provider);
+  const model = getModel();
+
+  logger.info('Executing complex task via Vercel AI SDK', {
     taskLength: task.length,
     timeout: opts.timeout,
-    model: COMPLEX_MODEL,
+    provider,
+    model: config.model,
+    supportsThinking: supportsThinking(provider),
     budgetTokens: opts.budgetTokens,
   });
 
   const db = getConversationDB();
-  const client = getClient();
 
   try {
     const systemPrompt = buildSystemPrompt(userId);
     const messages = buildMessages(userId, task, opts.historyLimit);
 
-    // Use extended thinking for complex tasks
-    const response = await client.messages.create({
-      model: COMPLEX_MODEL,
-      max_tokens: opts.maxTokens,
-      thinking: {
-        type: 'enabled',
-        budget_tokens: opts.budgetTokens,
-      },
+    // Build generation options
+    // Extended thinking is only available for Anthropic
+    const generateOptions: Parameters<typeof generateText>[0] = {
+      model,
       system: systemPrompt,
       messages,
-    });
+      maxOutputTokens: opts.maxTokens,
+    };
 
-    // Extract text from response (skip thinking blocks)
-    const textBlocks = response.content.filter((block) => block.type === 'text');
-    const result = textBlocks
-      .map((block) => (block.type === 'text' ? block.text : ''))
-      .join('\n');
+    // Add extended thinking for Anthropic
+    if (supportsThinking(provider)) {
+      // @ts-expect-error - experimental_thinking is Anthropic-specific
+      generateOptions.experimental_thinking = {
+        enabled: true,
+        budgetTokens: opts.budgetTokens,
+      };
+    }
+
+    const { text, usage } = await generateText(generateOptions);
 
     logger.info('Complex task completed', {
-      responseLength: result.length,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+      responseLength: text.length,
+      inputTokens: usage?.inputTokens,
+      outputTokens: usage?.outputTokens,
+      provider,
     });
 
     // Save both messages to history
     db.addMessage(userId, 'user', task);
-    db.addMessage(userId, 'assistant', result);
+    db.addMessage(userId, 'assistant', text);
 
-    return result;
+    return text;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error('Anthropic SDK complex execution failed', { error: errorMessage });
+    logger.error('AI SDK complex execution failed', { error: errorMessage, provider });
 
     if (opts.fallbackToSimple) {
       logger.info('Falling back to simple execution');
