@@ -1,8 +1,9 @@
-import { generateText } from 'ai';
+import { generateText, stepCountIs } from 'ai';
 import { logger } from '../utils/logger.js';
 import { getConversationDB } from '../db/conversations.js';
 import { loadLongTermMemory, initLongTermMemory, getMemoryDir } from '../db/longterm.js';
 import { getModel, getActiveProvider } from './providers.js';
+import { createMemoryTools } from './tools.js';
 
 export interface SimpleExecOptions {
   timeout?: number;
@@ -31,13 +32,23 @@ function buildSystemPrompt(userId: string): string {
     parts.push('');
   }
 
+  parts.push('=== MEMORY TOOLS ===');
+  parts.push('You MUST use the available tools to persist user information.');
+  parts.push('');
+  parts.push('Available tools:');
+  parts.push('- remember(key, value, file): Save facts to persistent memory');
+  parts.push('- recall(key, file): Retrieve stored info from memory');
+  parts.push('');
+  parts.push('CRITICAL: When a user shares personal information (name, location, preferences),');
+  parts.push('you MUST call the remember tool BEFORE responding with text.');
+  parts.push('');
+  parts.push('Examples of when to use remember:');
+  parts.push('- "Me llamo Juan" → CALL remember(key="Name", value="Juan", file="about")');
+  parts.push('- "Vivo en Madrid" → CALL remember(key="Location", value="Madrid", file="about")');
+  parts.push('- "Prefiero respuestas cortas" → CALL remember(key="Response style", value="short", file="preferences")');
+  parts.push('');
   parts.push('=== INSTRUCTIONS ===');
-  parts.push('- You can read/write files in /app/data/');
-  parts.push(`- Memory is stored in ${memoryDir}/`);
-  parts.push('  - Update about.md for user identity info (name, location, work)');
-  parts.push('  - Update preferences.md for user preferences (language, tone)');
-  parts.push('  - Create notes/{topic}.md for topic-specific notes');
-  parts.push('  - Create journal/{YYYY-MM-DD}.md for daily summaries');
+  parts.push(`- Memory files are stored in ${memoryDir}/`);
   parts.push('- Respond in the same language as the user');
 
   return parts.join('\n');
@@ -101,19 +112,33 @@ export async function execSimple(
   try {
     const systemPrompt = buildSystemPrompt(userId);
     const messages = buildMessages(userId, prompt, opts.historyLimit);
+    const tools = createMemoryTools(userId);
 
-    const { text, usage } = await generateText({
+    logger.debug('Tools available', {
+      toolNames: Object.keys(tools),
+      toolCount: Object.keys(tools).length,
+    });
+
+    const result = await generateText({
       model,
       system: systemPrompt,
       messages,
       maxOutputTokens: opts.maxTokens,
+      tools,
+      toolChoice: 'auto',
+      stopWhen: stepCountIs(5),
     });
+
+    const { text, usage, steps, toolCalls } = result;
 
     logger.info('Simple prompt completed', {
       responseLength: text.length,
       inputTokens: usage?.inputTokens,
       outputTokens: usage?.outputTokens,
       provider,
+      stepsCount: steps?.length || 0,
+      toolCallsCount: toolCalls?.length || 0,
+      toolCallNames: toolCalls?.map(tc => tc.toolName) || [],
     });
 
     // Save both messages to history

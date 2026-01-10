@@ -1,9 +1,10 @@
-import { generateText } from 'ai';
+import { generateText, stepCountIs } from 'ai';
 import { logger } from '../utils/logger.js';
 import { execSimple } from './simple.js';
 import { getConversationDB } from '../db/conversations.js';
 import { loadLongTermMemory, initLongTermMemory, getMemoryDir } from '../db/longterm.js';
 import { getModel, getActiveProvider, supportsThinking, getProviderConfig } from './providers.js';
+import { createMemoryTools } from './tools.js';
 
 export interface ComplexExecOptions {
   timeout?: number;
@@ -40,13 +41,23 @@ function buildSystemPrompt(userId: string): string {
     parts.push('');
   }
 
+  parts.push('=== MEMORY TOOLS ===');
+  parts.push('You MUST use the available tools to persist user information.');
+  parts.push('');
+  parts.push('Available tools:');
+  parts.push('- remember(key, value, file): Save facts to persistent memory');
+  parts.push('- recall(key, file): Retrieve stored info from memory');
+  parts.push('');
+  parts.push('CRITICAL: When a user shares personal information (name, location, preferences),');
+  parts.push('you MUST call the remember tool BEFORE responding with text.');
+  parts.push('');
+  parts.push('Examples of when to use remember:');
+  parts.push('- "Me llamo Juan" → CALL remember(key="Name", value="Juan", file="about")');
+  parts.push('- "Vivo en Madrid" → CALL remember(key="Location", value="Madrid", file="about")');
+  parts.push('- "Prefiero respuestas cortas" → CALL remember(key="Response style", value="short", file="preferences")');
+  parts.push('');
   parts.push('=== INSTRUCTIONS ===');
-  parts.push('- You can read/write files in /app/data/');
-  parts.push(`- Memory is stored in ${memoryDir}/`);
-  parts.push('  - Update about.md for user identity info (name, location, work)');
-  parts.push('  - Update preferences.md for user preferences (language, tone)');
-  parts.push('  - Create notes/{topic}.md for topic-specific notes');
-  parts.push('  - Create journal/{YYYY-MM-DD}.md for daily summaries');
+  parts.push(`- Memory files are stored in ${memoryDir}/`);
   parts.push('- Respond in the same language as the user');
   parts.push('- For complex tasks, break down your approach step by step');
   parts.push('- Provide comprehensive and detailed responses');
@@ -117,6 +128,7 @@ export async function execComplex(
   try {
     const systemPrompt = buildSystemPrompt(userId);
     const messages = buildMessages(userId, task, opts.historyLimit);
+    const tools = createMemoryTools(userId);
 
     // Build generation options
     // Extended thinking is only available for Anthropic
@@ -125,6 +137,9 @@ export async function execComplex(
       system: systemPrompt,
       messages,
       maxOutputTokens: opts.maxTokens,
+      tools,
+      toolChoice: 'auto',
+      stopWhen: stepCountIs(10),
     };
 
     // Add extended thinking for Anthropic
