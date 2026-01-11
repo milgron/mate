@@ -286,19 +286,26 @@ export default function ConfigPage() {
 
           <Separator className="my-4" />
 
-          <div className="flex gap-6">
+          <div className="flex gap-6 flex-wrap justify-center">
+            <Link
+              href="/patterns"
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-2"
+            >
+              Patterns
+              <span aria-hidden="true">&rarr;</span>
+            </Link>
             <Link
               href="/memories"
               className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-2"
             >
-              View memories
+              Memories
               <span aria-hidden="true">&rarr;</span>
             </Link>
             <Link
               href="/use"
               className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-2"
             >
-              View usage
+              Usage
               <span aria-hidden="true">&rarr;</span>
             </Link>
           </div>

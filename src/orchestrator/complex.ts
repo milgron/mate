@@ -6,6 +6,7 @@ import { getSemanticDB } from '../db/semantic.js';
 import { getModel, getActiveProvider, supportsThinking, getProviderConfig } from './providers.js';
 import { createMemoryTools, MemoryTool } from './tools.js';
 import { extractUserInfo, shouldRemember } from '../utils/patterns.js';
+import { matchCustomPatterns, executePatternAction, type PatternActionResult } from '../utils/custom-patterns.js';
 
 export interface ComplexExecOptions {
   timeout?: number;
@@ -117,6 +118,7 @@ function buildMessages(
 
 /**
  * Execute a complex task using the Vercel AI SDK.
+ * First checks for custom patterns and executes actions BEFORE calling the LLM.
  * Uses extended thinking for Anthropic, standard generation for other providers.
  * Includes retry logic for intermittent tool call failures.
  */
@@ -140,9 +142,28 @@ export async function execComplex(
     budgetTokens: opts.budgetTokens,
   });
 
+  // Check for custom patterns BEFORE sending to LLM
+  let patternResult: PatternActionResult | null = null;
+  const patternMatch = matchCustomPatterns(task);
+  if (patternMatch) {
+    logger.info('Custom pattern matched', {
+      trigger: patternMatch.pattern.trigger,
+      action: patternMatch.pattern.action,
+      captured: patternMatch.captured.slice(0, 50),
+    });
+    patternResult = await executePatternAction(patternMatch, userId);
+  }
+
   const db = getConversationDB();
   const systemPrompt = await buildSystemPrompt(userId);
-  const messages = buildMessages(userId, task, opts.historyLimit);
+
+  // Modify the task to include pattern action context
+  let effectiveTask = task;
+  if (patternResult?.success) {
+    effectiveTask = `[SYSTEM: Action already executed - ${patternResult.message}]\n\nUser message: ${task}\n\nRespond naturally, acknowledging the action was completed.`;
+  }
+
+  const messages = buildMessages(userId, effectiveTask, opts.historyLimit);
   const tools = createMemoryTools(userId);
 
   let lastError: Error | null = null;
@@ -187,8 +208,9 @@ export async function execComplex(
         attempt,
       });
 
-      // Fallback: If no tools were called but the message looks like it should remember something
-      if ((toolCalls?.length || 0) === 0 && shouldRemember(task)) {
+      // Fallback: If no tools were called and no custom pattern matched,
+      // but the message looks like it should remember something
+      if (!patternResult && (toolCalls?.length || 0) === 0 && shouldRemember(task)) {
         const extracted = extractUserInfo(task);
         if (extracted) {
           logger.info('Fallback pattern matching triggered', {

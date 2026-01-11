@@ -5,6 +5,7 @@ import { getSemanticDB } from '../db/semantic.js';
 import { getModel, getActiveProvider } from './providers.js';
 import { createMemoryTools, MemoryTool } from './tools.js';
 import { extractUserInfo, shouldRemember } from '../utils/patterns.js';
+import { matchCustomPatterns, executePatternAction, type PatternActionResult } from '../utils/custom-patterns.js';
 
 export interface SimpleExecOptions {
   timeout?: number;
@@ -106,6 +107,7 @@ function buildMessages(
 
 /**
  * Execute a simple prompt using the Vercel AI SDK.
+ * First checks for custom patterns and executes actions BEFORE calling the LLM.
  * Includes retry logic for intermittent tool call failures.
  * Falls back to pattern matching if tools aren't called.
  */
@@ -125,9 +127,28 @@ export async function execSimple(
     provider,
   });
 
+  // Check for custom patterns BEFORE sending to LLM
+  let patternResult: PatternActionResult | null = null;
+  const patternMatch = matchCustomPatterns(prompt);
+  if (patternMatch) {
+    logger.info('Custom pattern matched', {
+      trigger: patternMatch.pattern.trigger,
+      action: patternMatch.pattern.action,
+      captured: patternMatch.captured.slice(0, 50),
+    });
+    patternResult = await executePatternAction(patternMatch, userId);
+  }
+
   const db = getConversationDB();
   const systemPrompt = await buildSystemPrompt(userId);
-  const messages = buildMessages(userId, prompt, opts.historyLimit);
+
+  // Modify the prompt to include pattern action context
+  let effectivePrompt = prompt;
+  if (patternResult?.success) {
+    effectivePrompt = `[SYSTEM: Action already executed - ${patternResult.message}]\n\nUser message: ${prompt}\n\nRespond naturally, acknowledging the action was completed.`;
+  }
+
+  const messages = buildMessages(userId, effectivePrompt, opts.historyLimit);
   const tools = createMemoryTools(userId);
 
   let lastError: Error | null = null;
@@ -162,8 +183,9 @@ export async function execSimple(
         attempt,
       });
 
-      // Fallback: If no tools were called but the message looks like it should remember something
-      if ((toolCalls?.length || 0) === 0 && shouldRemember(prompt)) {
+      // Fallback: If no tools were called and no custom pattern matched,
+      // but the message looks like it should remember something
+      if (!patternResult && (toolCalls?.length || 0) === 0 && shouldRemember(prompt)) {
         const extracted = extractUserInfo(prompt);
         if (extracted) {
           logger.info('Fallback pattern matching triggered', {
